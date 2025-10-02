@@ -1,14 +1,48 @@
-// CÓDIGO COMPLETO E MODIFICADO PARA USAR FIREBASE
+// CÓDIGO COMPLETO E CORRIGIDO DA TELA DE CADASTRO DE PRODUTO
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:intl/intl.dart';
+
+// Esta classe de formatação de moeda que já tínhamos continua perfeita.
+class CurrencyInputFormatter extends TextInputFormatter {
+  final int maxDigitsBeforeDecimal;
+  final int maxDigitsAfterDecimal;
+
+  CurrencyInputFormatter(
+      {this.maxDigitsBeforeDecimal = 7, this.maxDigitsAfterDecimal = 2});
+
+  @override
+  TextEditingValue formatEditUpdate(
+      TextEditingValue oldValue, TextEditingValue newValue) {
+    String newText =
+    newValue.text.replaceAll(RegExp(r'[^0-9]'), '');
+
+    if (newText.isEmpty) {
+      return newValue.copyWith(text: '');
+    }
+
+    double value = double.parse(newText) / 100;
+
+    String integerPart = newText.substring(0, newText.length - 2);
+    if (integerPart.length > maxDigitsBeforeDecimal) {
+      return oldValue;
+    }
+
+    final formatter = NumberFormat.currency(locale: 'pt_BR', symbol: 'R\$');
+    String formattedText = formatter.format(value);
+
+    return newValue.copyWith(
+      text: formattedText,
+      selection: TextSelection.collapsed(offset: formattedText.length),
+    );
+  }
+}
 
 class TelaCadastroProduto extends StatefulWidget {
   final QueryDocumentSnapshot? produtoParaEditar;
-
   const TelaCadastroProduto({super.key, this.produtoParaEditar});
-
   @override
   State<TelaCadastroProduto> createState() => _TelaCadastroProdutoState();
 }
@@ -17,14 +51,18 @@ class _TelaCadastroProdutoState extends State<TelaCadastroProduto> {
   final _formKey = GlobalKey<FormState>();
 
   final List<String> _tiposDeProduto = const [
-    'ACESSÓRIO', 'ELETRICO', 'EPI', 'EXTINTOR',
-    'FERRAMENTA', 'HIDRANTE', 'LOGISTICA', 'MANGUEIRA',
-    'MATERIAL ESCRITORIO', 'MATERIAL LIMPEZA', 'OBRA',
-    'PRODUÇÃO', 'SINALIZAÇÃO', 'SISTEMA ALARME', 'SISTEMA BOMBA',
-    'UNIFORME'
+    'ACESSÓRIO', 'ELETRICO', 'EPI', 'EXTINTOR', 'FERRAMENTA', 'HIDRANTE',
+    'LOGISTICA', 'MANGUEIRA', 'MATERIAL ESCRITORIO', 'MATERIAL LIMPEZA', 'OBRA',
+    'PRODUÇÃO', 'SINALIZAÇÃO', 'SISTEMA ALARME', 'SISTEMA BOMBA', 'UNIFORME'
   ];
-  final List<String> _gruposDeProduto = const ['CONSUMO', "EPI'S", 'MATERIA PRIMA', 'REVENDA'];
-  final List<String> _unidadesDeMedida = const ['BD', 'BR', 'CX', 'KG', 'LATA', 'LTS', 'MTS', 'PCT', 'PÇ'];
+  final List<String> _gruposDeProduto = const [
+    'CONSUMO', "EPI'S", 'MATERIA PRIMA', 'REVENDA'
+  ];
+  // O "PORQUÊ": Adicionamos "PACOTE" para compatibilidade com dados antigos,
+  // permitindo a edição sem erros, enquanto mantemos "PCT" como o padrão.
+  final List<String> _unidadesDeMedida = const [
+    'BD', 'BR', 'CX', 'KG', 'LATA', 'LTS', 'MTS', 'PACOTE', 'PAR', 'PCT', 'PÇ'
+  ];
 
   final _codigoController = TextEditingController();
   final _nomeController = TextEditingController();
@@ -36,9 +74,7 @@ class _TelaCadastroProdutoState extends State<TelaCadastroProduto> {
   String? _grupoSelecionado;
   String? _unidadeSelecionada;
 
-  // MODIFICAÇÃO 1: Nova variável de estado para o status do produto. Padrão é 'true' (ativo).
   bool _produtoAtivo = true;
-
   bool _isLoading = false;
   String _tituloAppBar = 'Cadastrar Novo Produto';
   String _textoBotaoSalvar = 'Salvar Produto';
@@ -51,16 +87,15 @@ class _TelaCadastroProdutoState extends State<TelaCadastroProduto> {
 
       _codigoController.text = dados['codigo'] ?? '';
       _nomeController.text = dados['nome'] ?? '';
-      _estoqueMinimoController.text = (dados['estoqueMinimo'] ?? 0).toString();
-      _estoqueMaximoController.text = (dados['estoqueMaximo'] ?? 0).toString();
-      _valorController.text = (dados['valor'] ?? 0.0).toString();
+
+      _estoqueMinimoController.text = (dados['estoqueMinimo'] ?? 0.0).toString().replaceAll('.', ',');
+      _estoqueMaximoController.text = (dados['estoqueMaximo'] ?? 0.0).toString().replaceAll('.', ',');
+      _valorController.text = (dados['valor'] ?? 0.0).toStringAsFixed(2).replaceAll('.', ',');
 
       setState(() {
         _tipoSelecionado = dados['tipo'];
         _grupoSelecionado = dados['grupo'];
         _unidadeSelecionada = dados['unidade'];
-
-        // MODIFICAÇÃO 2: Carrega o status atual do produto. Se o campo não existir, assume 'true'.
         _produtoAtivo = dados['ativo'] ?? true;
       });
 
@@ -84,62 +119,59 @@ class _TelaCadastroProdutoState extends State<TelaCadastroProduto> {
       setState(() {
         _isLoading = true;
       });
-
       try {
         final codigo = _codigoController.text.trim();
         final modoEdicao = widget.produtoParaEditar != null;
-
         final db = FirebaseFirestore.instance;
-        final query = await db.collection('produtos').where('codigo', isEqualTo: codigo).get();
-
+        final query =
+        await db.collection('produtos').where('codigo', isEqualTo: codigo).get();
         if (query.docs.isNotEmpty) {
-          if (!modoEdicao || (modoEdicao && query.docs.first.id != widget.produtoParaEditar!.id)) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('Erro: Este código de produto já existe.'), backgroundColor: Colors.red),
-            );
-            // MODIFICAÇÃO: Garantir que o loading pare em caso de erro
+          if (!modoEdicao ||
+              (modoEdicao && query.docs.first.id != widget.produtoParaEditar!.id)) {
+            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                content: Text('Erro: Este código de produto já existe.'),
+                backgroundColor: Colors.red));
             setState(() => _isLoading = false);
             return;
           }
         }
-
-        // MODIFICAÇÃO 4: Adicionado o campo 'ativo' e corrigido o bug de 'quantidadeAtual'
         final Map<String, dynamic> dadosProduto = {
           'codigo': codigo,
           'nome': _nomeController.text.trim(),
           'tipo': _tipoSelecionado,
           'grupo': _grupoSelecionado,
           'unidade': _unidadeSelecionada,
-          'estoqueMinimo': int.tryParse(_estoqueMinimoController.text) ?? 0,
-          'estoqueMaximo': int.tryParse(_estoqueMaximoController.text) ?? 0,
-          'valor': double.tryParse(_valorController.text.replaceAll(',', '.')) ?? 0.0,
-          'ativo': _produtoAtivo, // Nosso novo campo!
+          'estoqueMinimo': double.tryParse(_estoqueMinimoController.text.replaceAll(',', '.')) ?? 0.0,
+          'estoqueMaximo': double.tryParse(_estoqueMaximoController.text.replaceAll(',', '.')) ?? 0.0,
+          'valor': double.tryParse(_valorController.text
+              .replaceAll(RegExp(r'[^0-9,]'), '')
+              .replaceAll(',', '.')) ??
+              0.0,
+          'ativo': _produtoAtivo,
           'timestamp': FieldValue.serverTimestamp(),
         };
-
         if (modoEdicao) {
-          // Atualiza um produto existente (não mexe na quantidadeAtual)
-          await db.collection('produtos').doc(widget.produtoParaEditar!.id).update(dadosProduto);
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Produto atualizado com sucesso!'), backgroundColor: Colors.blue),
-          );
+          await db
+              .collection('produtos')
+              .doc(widget.produtoParaEditar!.id)
+              .update(dadosProduto);
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+              content: Text('Produto atualizado com sucesso!'),
+              backgroundColor: Colors.blue));
         } else {
-          // Adiciona um novo produto
-          dadosProduto['quantidadeAtual'] = 0; // Quantidade inicial é 0 apenas para produtos NOVOS
+          dadosProduto['quantidadeAtual'] = 0.0;
           await db.collection('produtos').add(dadosProduto);
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Produto salvo com sucesso!'), backgroundColor: Colors.green),
-          );
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+              content: Text('Produto salvo com sucesso!'),
+              backgroundColor: Colors.green));
         }
-
         if (mounted) Navigator.of(context).pop();
-
       } catch (e) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Erro ao salvar no Firebase: $e'), backgroundColor: Colors.red),
-        );
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text('Erro ao salvar no Firebase: $e'),
+            backgroundColor: Colors.red));
       } finally {
-        if(mounted) {
+        if (mounted) {
           setState(() {
             _isLoading = false;
           });
@@ -163,75 +195,107 @@ class _TelaCadastroProdutoState extends State<TelaCadastroProduto> {
                 TextFormField(
                   controller: _codigoController,
                   decoration: const InputDecoration(labelText: 'Código'),
-                  validator: (value) => (value == null || value.isEmpty) ? 'O código é obrigatório.' : null,
+                  validator: (value) =>
+                  (value == null || value.isEmpty) ? 'O código é obrigatório.' : null,
+                  inputFormatters: [
+                    LengthLimitingTextInputFormatter(7),
+                  ],
                 ),
                 const SizedBox(height: 16),
                 TextFormField(
                   controller: _nomeController,
                   decoration: const InputDecoration(labelText: 'Nome do Produto'),
-                  validator: (value) => (value == null || value.isEmpty) ? 'O nome é obrigatório.' : null,
+                  validator: (value) =>
+                  (value == null || value.isEmpty) ? 'O nome é obrigatório.' : null,
                 ),
                 const SizedBox(height: 16),
                 DropdownButtonFormField<String>(
                   value: _tipoSelecionado,
                   hint: const Text('Tipo'),
-                  items: _tiposDeProduto.map((String tipo) => DropdownMenuItem<String>(value: tipo, child: Text(tipo))).toList(),
-                  onChanged: (String? novoValor) => setState(() => _tipoSelecionado = novoValor),
-                  validator: (value) => value == null ? 'Selecione um tipo' : null,
+                  items: _tiposDeProduto.map((String tipo) =>
+                      DropdownMenuItem<String>(value: tipo, child: Text(tipo)))
+                      .toList(),
+                  onChanged: (String? novoValor) =>
+                      setState(() => _tipoSelecionado = novoValor),
+                  validator: (value) =>
+                  value == null ? 'Selecione um tipo' : null,
                 ),
                 const SizedBox(height: 16),
                 DropdownButtonFormField<String>(
                   value: _grupoSelecionado,
                   hint: const Text('Grupo'),
-                  items: _gruposDeProduto.map((String grupo) => DropdownMenuItem<String>(value: grupo, child: Text(grupo))).toList(),
-                  onChanged: (String? novoValor) => setState(() => _grupoSelecionado = novoValor),
-                  validator: (value) => value == null ? 'Selecione um grupo' : null,
+                  items: _gruposDeProduto.map((String grupo) =>
+                      DropdownMenuItem<String>(value: grupo, child: Text(grupo)))
+                      .toList(),
+                  onChanged: (String? novoValor) =>
+                      setState(() => _grupoSelecionado = novoValor),
+                  validator: (value) =>
+                  value == null ? 'Selecione um grupo' : null,
                 ),
                 const SizedBox(height: 16),
                 DropdownButtonFormField<String>(
                   value: _unidadeSelecionada,
                   hint: const Text('Unidade'),
-                  items: _unidadesDeMedida.map((String unidade) => DropdownMenuItem<String>(value: unidade, child: Text(unidade))).toList(),
-                  onChanged: (String? novoValor) => setState(() => _unidadeSelecionada = novoValor),
-                  validator: (value) => value == null ? 'Selecione uma unidade' : null,
+                  items: _unidadesDeMedida.map((String unidade) =>
+                      DropdownMenuItem<String>(value: unidade, child: Text(unidade)))
+                      .toList(),
+                  onChanged: (String? novoValor) =>
+                      setState(() => _unidadeSelecionada = novoValor),
+                  validator: (value) =>
+                  value == null ? 'Selecione uma unidade' : null,
                 ),
                 const SizedBox(height: 16),
                 TextFormField(
                   controller: _estoqueMinimoController,
                   decoration: const InputDecoration(labelText: 'Estoque Mínimo'),
-                  keyboardType: TextInputType.number,
-                  inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  inputFormatters: [
+                    FilteringTextInputFormatter.allow(RegExp(r'^\d+\,?\d{0,3}')),
+                    LengthLimitingTextInputFormatter(10),
+                  ],
                 ),
                 const SizedBox(height: 16),
                 TextFormField(
                   controller: _estoqueMaximoController,
                   decoration: const InputDecoration(labelText: 'Estoque Máximo'),
-                  keyboardType: TextInputType.number,
-                  inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  inputFormatters: [
+                    FilteringTextInputFormatter.allow(RegExp(r'^\d+\,?\d{0,3}')),
+                    LengthLimitingTextInputFormatter(10),
+                  ],
                 ),
                 const SizedBox(height: 16),
                 TextFormField(
                   controller: _valorController,
-                  decoration: const InputDecoration(labelText: 'Valor (R\$)'),
-                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  decoration: const InputDecoration(labelText: 'Valor'),
+                  keyboardType:
+                  const TextInputType.numberWithOptions(decimal: true),
+                  inputFormatters: [
+                    CurrencyInputFormatter(maxDigitsBeforeDecimal: 7),
+                  ],
+                  validator: (value) {
+                    if (value == null || value.isEmpty) {
+                      return 'O valor é obrigatório.';
+                    }
+                    return null;
+                  },
                 ),
                 const SizedBox(height: 24),
-
-                // MODIFICAÇÃO 3: Novo widget Switch para ativar/desativar o produto
                 SwitchListTile(
                   title: const Text('Produto Ativo'),
-                  subtitle: const Text('Produtos inativos não aparecerão na lista principal ou em novas movimentações.'),
+                  subtitle: const Text(
+                      'Produtos inativos não aparecerão na lista principal ou em novas movimentações.'),
                   value: _produtoAtivo,
                   onChanged: (bool valor) {
                     setState(() {
                       _produtoAtivo = valor;
                     });
                   },
-                  secondary: Icon(_produtoAtivo ? Icons.check_circle : Icons.cancel, color: _produtoAtivo ? Colors.green : Colors.grey),
+                  secondary: Icon(
+                      _produtoAtivo ? Icons.check_circle : Icons.cancel,
+                      color: _produtoAtivo ? Colors.green : Colors.grey),
                 ),
-
                 const SizedBox(height: 24),
-
                 ElevatedButton(
                   onPressed: _salvar,
                   child: _isLoading
@@ -250,3 +314,4 @@ class _TelaCadastroProdutoState extends State<TelaCadastroProduto> {
     );
   }
 }
+

@@ -1,24 +1,25 @@
 // Arquivo: lib/models/movimentacao.dart
 // VERSÃO REFATORADA PARA FIREBASE
 
-// Não precisamos mais de nenhum import do sistema antigo!
-
 enum TipoMovimentacao {
   entrada,
   saida,
 }
 
 class Movimentacao {
-  // --- CAMPOS MODIFICADOS ---
-  // Substituímos o objeto 'Produto' por referências diretas.
-  final String produtoId;       // ID do documento do produto no Firestore
-  final String produtoNome;     // Cópia do nome do produto no momento da movimentação
-  final String produtoCodigo;   // Cópia do código do produto
+  final String produtoId;
+  final String produtoNome;
+  final String produtoCodigo;
 
   final TipoMovimentacao tipo;
-  final int quantidade;
+  // O "PORQUÊ": Esta é a correção principal. Alteramos o tipo de 'int' para
+  // 'double' para que a classe possa aceitar quantidades com casas decimais.
+  final double quantidade;
   final DateTime data;
   final String? subTipo;
+
+  final double? valorUnitarioMovimentacao;
+
   final String? numeroNF;
   final String? numeroOS;
   final String? nomeFornecedor;
@@ -30,7 +31,6 @@ class Movimentacao {
   final String? centroDeCusto;
 
   Movimentacao({
-    // Construtor atualizado
     required this.produtoId,
     required this.produtoNome,
     required this.produtoCodigo,
@@ -38,6 +38,7 @@ class Movimentacao {
     required this.quantidade,
     required this.data,
     this.subTipo,
+    this.valorUnitarioMovimentacao,
     this.numeroNF,
     this.numeroOS,
     this.nomeFornecedor,
@@ -49,16 +50,15 @@ class Movimentacao {
     this.centroDeCusto,
   });
 
-  // --- toJson ATUALIZADO ---
-  // Salva as referências do produto em vez de um único nome.
   Map<String, dynamic> toJson() => {
     'produtoId': produtoId,
     'produtoNome': produtoNome,
     'produtoCodigo': produtoCodigo,
-    'tipo': tipo.name, // .name converte o enum para String (ex: 'entrada')
+    'tipo': tipo.name,
     'quantidade': quantidade,
-    'data': data.toIso8601String(), // Formato padrão para datas
+    'data': data.toIso8601String(),
     'subTipo': subTipo,
+    'valorUnitarioMovimentacao': valorUnitarioMovimentacao,
     'numeroNF': numeroNF,
     'numeroOS': numeroOS,
     'nomeFornecedor': nomeFornecedor,
@@ -70,17 +70,19 @@ class Movimentacao {
     'centroDeCusto': centroDeCusto,
   };
 
-  // --- fromJson ATUALIZADO ---
-  // Agora é muito mais simples! Apenas lê os dados, sem precisar pesquisar em listas.
   factory Movimentacao.fromJson(Map<String, dynamic> json) {
     return Movimentacao(
-      produtoId: json['produtoId'] ?? '', // Usa ?? para evitar erros se o campo não existir
+      produtoId: json['produtoId'] ?? '',
       produtoNome: json['produtoNome'] ?? 'PRODUTO NÃO ENCONTRADO',
       produtoCodigo: json['produtoCodigo'] ?? 'N/A',
       tipo: TipoMovimentacao.values.byName(json['tipo']),
-      quantidade: json['quantidade'],
+      // O "PORQUÊ": Ao ler do Firebase, garantimos que o número seja
+      // convertido para 'double', não importa se ele foi salvo como int ou double.
+      quantidade: (json['quantidade'] as num).toDouble(),
       data: DateTime.parse(json['data']),
       subTipo: json['subTipo'],
+      valorUnitarioMovimentacao:
+      (json['valorUnitarioMovimentacao'] as num?)?.toDouble(),
       numeroNF: json['numeroNF'],
       numeroOS: json['numeroOS'],
       nomeFornecedor: json['nomeFornecedor'],

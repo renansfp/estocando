@@ -1,10 +1,10 @@
+// CÓDIGO ATUALIZADO COM AUTOCOMPLETE E TODOS OS CARDS E FUNÇÕES
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:estocando/telas/tela_cadastro_parceiro.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
-import 'package:dropdown_search/dropdown_search.dart';
 
-// Classes de suporte locais
 class _ProdutoValor {
   final String nome;
   final double valor;
@@ -33,31 +33,30 @@ class TelaRelatorios extends StatefulWidget {
 }
 
 class _TelaRelatoriosState extends State<TelaRelatorios> {
-  // =======================================================================
-  // 1. VARIÁVEIS DE ESTADO
-  // =======================================================================
   late Future<Map<String, QuerySnapshot>> _dadosFuture;
   DateTime? _dataInicio;
   DateTime? _dataFim;
   QueryDocumentSnapshot? _parceiroSelecionadoParaAnalise;
   DateTime? _dataHistoricaSelecionada;
 
-  // =======================================================================
-  // 2. MÉTODOS DE CICLO DE VIDA (LIFECYCLE)
-  // =======================================================================
+  final TextEditingController _clienteAutocompleteController = TextEditingController();
+
   @override
   void initState() {
     super.initState();
     _dadosFuture = _carregarDadosDoFirebase();
   }
 
-  // =======================================================================
-  // 3. MÉTODO PRINCIPAL DE CONSTRUÇÃO DA UI (BUILD)
-  // =======================================================================
+  @override
+  void dispose() {
+    _clienteAutocompleteController.dispose();
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Dashboard de Relatórios'), backgroundColor: Colors.teal),
+      appBar: AppBar(title: const Text('Dashboard de Relatórios')),
       body: FutureBuilder<Map<String, QuerySnapshot>>(
         future: _dadosFuture,
         builder: (context, snapshot) {
@@ -67,7 +66,7 @@ class _TelaRelatoriosState extends State<TelaRelatorios> {
           if (snapshot.hasError) {
             return Center(child: Text('Erro ao carregar dados: ${snapshot.error}'));
           }
-          if (!snapshot.hasData) {
+          if (!snapshot.hasData || !snapshot.data!.isNotEmpty) {
             return const Center(child: Text('Nenhum dado encontrado.'));
           }
 
@@ -75,22 +74,16 @@ class _TelaRelatoriosState extends State<TelaRelatorios> {
           final movimentacoes = snapshot.data!['movimentacoes']!.docs;
           final parceiros = snapshot.data!['parceiros']!.docs;
 
-          final List<ProdutoComEstoqueHistorico> produtosHistoricos =
-          _calcularEstoqueHistorico(produtos, movimentacoes, _dataHistoricaSelecionada);
-
-          final double valorTotalHistorico = produtosHistoricos.fold(
-              0.0, (previousValue, produto) => previousValue + produto.custoTotal);
-
-          final Map<String, double> valoresProdutos = {
-            for (var p in produtos) p.id: (p.data() as Map<String, dynamic>)['valor'] ?? 0.0
-          };
-
+          final List<QueryDocumentSnapshot> clientes = parceiros.where((doc) => (doc.data() as Map<String, dynamic>)['tipo'] == TipoParceiro.cliente.name).toList();
+          final List<ProdutoComEstoqueHistorico> produtosHistoricos = _calcularEstoqueHistorico(produtos, movimentacoes, _dataHistoricaSelecionada);
+          final double valorTotalHistorico = produtosHistoricos.fold(0.0, (previousValue, produto) => previousValue + produto.custoTotal);
+          final Map<String, double> valoresProdutos = { for (var p in produtos) p.id: (p.data() as Map<String, dynamic>)['valor'] ?? 0.0 };
           final formatadorMoeda = NumberFormat.currency(locale: 'pt_BR', symbol: 'R\$');
           final valorTotal = _calcularValorTotalEstoque(produtos);
           final qtdPontoPedido = _contarProdutosPontoDePedido(produtos);
           final gastosPorCC = _calcularGastoPorCentroDeCusto(movimentacoes, valoresProdutos, _dataInicio, _dataFim);
           final curvaABC = _calcularCurvaABC(movimentacoes, valoresProdutos);
-          final consumoPorCliente = _calcularConsumoPorCliente(movimentacoes, parceiros);
+          final consumoPorCliente = _calcularConsumoPorCliente(movimentacoes);
           final relatorioRevenda = _calcularEstoqueRevenda(produtos, _dataHistoricaSelecionada != null ? produtosHistoricos : null, movimentacoes);
           final totalSaidasItau = _calcularSaidasItau(movimentacoes, valoresProdutos, _dataInicio, _dataFim);
 
@@ -147,8 +140,6 @@ class _TelaRelatoriosState extends State<TelaRelatorios> {
                   conteudo: Text('$qtdPontoPedido', style: const TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: Colors.blueGrey)),
                 ),
                 const SizedBox(height: 16),
-
-                // MODIFICAÇÃO INÍCIO: Lógica do card "Gasto por Centro de Custo" simplificada.
                 _buildCardRelatorio(
                   titulo: 'Gasto por Centro de Custo',
                   cor: Colors.red,
@@ -164,7 +155,6 @@ class _TelaRelatoriosState extends State<TelaRelatorios> {
                         Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            // Lista detalhada do período
                             ...gastosPorCC.entries.map((entry) =>
                                 Padding(
                                     padding: const EdgeInsets.symmetric(vertical: 4.0),
@@ -178,7 +168,6 @@ class _TelaRelatoriosState extends State<TelaRelatorios> {
                                 )
                             ).toList(),
                             const Divider(height: 20, thickness: 1.5),
-                            // Soma do período
                             Padding(
                               padding: const EdgeInsets.only(top: 8.0),
                               child: Row(
@@ -197,16 +186,16 @@ class _TelaRelatoriosState extends State<TelaRelatorios> {
                     ],
                   ),
                 ),
-                // MODIFICAÇÃO FIM
-
                 const SizedBox(height: 16),
                 _buildCardRelatorio(
                   titulo: 'Saídas para Itaú (Consumo Interno)',
                   cor: Colors.amber.shade800,
                   conteudo: Column(
                     children: [
+                      _buildSeletorDePeriodo(),
+                      const Divider(height: 30),
                       if (_dataInicio == null || _dataFim == null)
-                        const Text('Selecione um período nos filtros acima.')
+                        const Text('Selecione um período para a análise.')
                       else if (totalSaidasItau == 0)
                         const Text('Nenhuma saída para o Itaú encontrada no período.')
                       else
@@ -241,19 +230,48 @@ class _TelaRelatoriosState extends State<TelaRelatorios> {
                   conteudo: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      DropdownSearch<QueryDocumentSnapshot>(
-                        popupProps: PopupProps.menu(
-                          showSearchBox: true,
-                          searchFieldProps: const TextFieldProps(decoration: InputDecoration(labelText: 'Buscar por nome')),
-                          emptyBuilder: (context, search) => const Center(child: Text('Nenhum cliente encontrado.')),
-                        ),
-                        items: parceiros.where((doc) => (doc.data() as Map<String, dynamic>)['tipo'] == TipoParceiro.cliente.name).toList(),
-                        itemAsString: (QueryDocumentSnapshot doc) => (doc.data() as Map<String, dynamic>)['nome'] ?? 'Nome não encontrado',
-                        dropdownDecoratorProps: const DropDownDecoratorProps(
-                          dropdownSearchDecoration: InputDecoration(labelText: 'Selecione um Cliente', border: OutlineInputBorder()),
-                        ),
-                        onChanged: (QueryDocumentSnapshot? doc) => setState(() => _parceiroSelecionadoParaAnalise = doc),
-                        selectedItem: _parceiroSelecionadoParaAnalise,
+                      Autocomplete<QueryDocumentSnapshot>(
+                        displayStringForOption: (option) {
+                          final data = option.data() as Map<String, dynamic>;
+                          return data['nome'] ?? 'Nome não encontrado';
+                        },
+                        fieldViewBuilder: (context, textEditingController, focusNode, onFieldSubmitted) {
+                          return TextFormField(
+                            controller: textEditingController,
+                            focusNode: focusNode,
+                            decoration: InputDecoration(
+                                labelText: 'Buscar Cliente por Nome',
+                                border: const OutlineInputBorder(),
+                                suffixIcon: IconButton(
+                                  icon: const Icon(Icons.clear),
+                                  onPressed: () {
+                                    textEditingController.clear();
+                                    FocusScope.of(context).unfocus();
+                                    setState(() {
+                                      _parceiroSelecionadoParaAnalise = null;
+                                    });
+                                  },
+                                )
+                            ),
+                          );
+                        },
+                        optionsBuilder: (TextEditingValue textEditingValue) {
+                          final query = textEditingValue.text.toLowerCase();
+                          if (query.isEmpty) {
+                            return const Iterable<QueryDocumentSnapshot>.empty();
+                          }
+                          return clientes.where((option) {
+                            final data = option.data() as Map<String, dynamic>;
+                            final nome = (data['nome'] ?? '').toLowerCase();
+                            return nome.contains(query);
+                          });
+                        },
+                        onSelected: (selection) {
+                          FocusScope.of(context).unfocus();
+                          setState(() {
+                            _parceiroSelecionadoParaAnalise = selection;
+                          });
+                        },
                       ),
                       const Divider(height: 30),
                       if (_parceiroSelecionadoParaAnalise == null)
@@ -316,9 +334,6 @@ class _TelaRelatoriosState extends State<TelaRelatorios> {
     );
   }
 
-  // =======================================================================
-  // 4. MÉTODOS DE LÓGICA E DADOS
-  // =======================================================================
   Future<Map<String, QuerySnapshot>> _carregarDadosDoFirebase() async {
     final db = FirebaseFirestore.instance;
     final produtosFuture = db.collection('produtos').get();
@@ -417,32 +432,8 @@ class _TelaRelatoriosState extends State<TelaRelatorios> {
     return gastosPorCC;
   }
 
-  Map<String, dynamic> _calcularEstoqueRevenda(List<QueryDocumentSnapshot> produtos, List<ProdutoComEstoqueHistorico>? listaProdutosHistoricos, List<QueryDocumentSnapshot> movimentacoes) {
-    final idsProdutosRevenda = produtos.where((doc) => (doc.data() as Map<String, dynamic>)['grupo'] == 'REVENDA').map((doc) => doc.id).toSet();
-    List<ProdutoComEstoqueHistorico> itensRevenda;
-    if (listaProdutosHistoricos != null) {
-      final produtosMap = {for (var p in produtos) p.id: p};
-      itensRevenda = listaProdutosHistoricos.where((p) {
-        final produtoDoc = produtosMap.values.firstWhere((doc) => (doc.data() as Map<String,dynamic>)['codigo'] == p.codigo, orElse: () => produtos.first);
-        return idsProdutosRevenda.contains(produtoDoc.id);
-      }).toList();
-    } else {
-      itensRevenda = produtos.where((p) => idsProdutosRevenda.contains(p.id) && (p.data() as Map<String, dynamic>)['quantidadeAtual'] > 0).map((p) {
-        final pData = p.data() as Map<String, dynamic>;
-        return ProdutoComEstoqueHistorico(
-          codigo: pData['codigo'] ?? 'N/A',
-          nome: pData['nome'] ?? 'N/A',
-          quantidade: pData['quantidadeAtual'] ?? 0,
-          custoUnitario: (pData['valor'] ?? 0.0).toDouble(),
-        );
-      }).toList();
-    }
-    final double valorTotalRevenda = itensRevenda.fold(0.0, (total, item) => total + item.custoTotal);
-    return {'valorTotalRevenda': valorTotalRevenda, 'itensRevenda': itensRevenda};
-  }
-
   Map<String, List<_ProdutoValor>> _calcularCurvaABC(List<QueryDocumentSnapshot> movimentacoes, Map<String, double> valoresProdutos) {
-    if (_dataInicio == null || _dataFim == null) return {};
+    if (_dataInicio == null || _dataFim == null) return {'A': [], 'B': [], 'C': []};
     final Map<String, double> valorPorProduto = {};
     final fim = DateTime(_dataFim!.year, _dataFim!.month, _dataFim!.day, 23, 59, 59);
     final saidas = movimentacoes.where((doc) {
@@ -450,7 +441,7 @@ class _TelaRelatoriosState extends State<TelaRelatorios> {
       final dataMov = DateTime.parse(data['data']);
       return data['tipo'] == 'saida' && dataMov.isAfter(_dataInicio!) && dataMov.isBefore(fim);
     });
-    if (saidas.isEmpty) return {};
+    if (saidas.isEmpty) return {'A': [], 'B': [], 'C': []};
     for (var movDoc in saidas) {
       final movData = movDoc.data() as Map<String, dynamic>;
       final produtoId = movData['produtoId'];
@@ -462,7 +453,7 @@ class _TelaRelatoriosState extends State<TelaRelatorios> {
     final listaOrdenada = valorPorProduto.entries.map((e) => _ProdutoValor(nome: e.key, valor: e.value)).toList();
     listaOrdenada.sort((a, b) => b.valor.compareTo(a.valor));
     final valorTotalSaidas = valorPorProduto.values.fold(0.0, (a, b) => a + b);
-    if (valorTotalSaidas == 0) return {};
+    if (valorTotalSaidas == 0) return {'A': [], 'B': [], 'C': []};
     final Map<String, List<_ProdutoValor>> curvaABC = {'A': [], 'B': [], 'C': []};
     double valorAcumulado = 0;
     for (var item in listaOrdenada) {
@@ -475,21 +466,14 @@ class _TelaRelatoriosState extends State<TelaRelatorios> {
     return curvaABC;
   }
 
-  Map<String, Map<String, int>> _calcularConsumoPorCliente(List<QueryDocumentSnapshot> movimentacoes, List<QueryDocumentSnapshot> parceiros) {
+  Map<String, Map<String, int>> _calcularConsumoPorCliente(List<QueryDocumentSnapshot> movimentacoes) {
     if (_parceiroSelecionadoParaAnalise == null) return {};
     final dadosParceiro = _parceiroSelecionadoParaAnalise!.data() as Map<String, dynamic>;
     final nomeParceiroSelecionado = dadosParceiro['nome'];
-    final dataInicioFilter = _dataInicio;
-    final dataFimFilter = _dataFim != null ? DateTime(_dataFim!.year, _dataFim!.month, _dataFim!.day, 23, 59, 59) : null;
     final consumoPorOS = <String, Map<String, int>>{};
     final movsFiltrados = movimentacoes.where((doc) {
       final data = doc.data() as Map<String, dynamic>;
-      bool dentroDoPeriodo = true;
-      if (dataInicioFilter != null && dataFimFilter != null) {
-        final dataMov = DateTime.parse(data['data']);
-        dentroDoPeriodo = dataMov.isAfter(dataInicioFilter) && dataMov.isBefore(dataFimFilter);
-      }
-      return (data['subTipo'] == 'OS' || data['subTipo'] == 'Venda') && data['nomeCliente'] == nomeParceiroSelecionado && dentroDoPeriodo;
+      return (data['subTipo'] == 'OS' || data['subTipo'] == 'Venda') && data['nomeCliente'] == nomeParceiroSelecionado;
     });
     for (var movDoc in movsFiltrados) {
       final movData = movDoc.data() as Map<String, dynamic>;
@@ -522,9 +506,30 @@ class _TelaRelatoriosState extends State<TelaRelatorios> {
     return valorTotalItau;
   }
 
-  // =======================================================================
-  // 5. MÉTODOS AUXILIARES DE UI (_build...)
-  // =======================================================================
+  Map<String, dynamic> _calcularEstoqueRevenda(List<QueryDocumentSnapshot> produtos, List<ProdutoComEstoqueHistorico>? listaProdutosHistoricos, List<QueryDocumentSnapshot> movimentacoes) {
+    final idsProdutosRevenda = produtos.where((doc) => (doc.data() as Map<String, dynamic>)['grupo'] == 'REVENDA').map((doc) => doc.id).toSet();
+    List<ProdutoComEstoqueHistorico> itensRevenda;
+    if (listaProdutosHistoricos != null) {
+      final produtosMap = {for (var p in produtos) p.id: p};
+      itensRevenda = listaProdutosHistoricos.where((p) {
+        final produtoDoc = produtosMap.values.firstWhere((doc) => (doc.data() as Map<String,dynamic>)['codigo'] == p.codigo, orElse: () => produtos.first);
+        return idsProdutosRevenda.contains(produtoDoc.id);
+      }).toList();
+    } else {
+      itensRevenda = produtos.where((p) => idsProdutosRevenda.contains(p.id) && (p.data() as Map<String, dynamic>)['quantidadeAtual'] > 0).map((p) {
+        final pData = p.data() as Map<String, dynamic>;
+        return ProdutoComEstoqueHistorico(
+          codigo: pData['codigo'] ?? 'N/A',
+          nome: pData['nome'] ?? 'N/A',
+          quantidade: pData['quantidadeAtual'] ?? 0,
+          custoUnitario: (pData['valor'] ?? 0.0).toDouble(),
+        );
+      }).toList();
+    }
+    final double valorTotalRevenda = itensRevenda.fold(0.0, (total, item) => total + item.custoTotal);
+    return {'valorTotalRevenda': valorTotalRevenda, 'itensRevenda': itensRevenda};
+  }
+
   Widget _buildTabelaEstoqueDetalhado(List<ProdutoComEstoqueHistorico> produtos) {
     final formatoMoeda = NumberFormat.currency(locale: 'pt_BR', symbol: 'R\$');
     if (produtos.isEmpty) {

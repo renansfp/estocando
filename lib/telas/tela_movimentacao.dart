@@ -1,14 +1,42 @@
-// CÓDIGO FINAL E COMPLETO DA TELA DE MOVIMENTAÇÃO
+// CÓDIGO 100% COMPLETO E FINAL DA TELA DE MOVIMENTAÇÃO (29/09/2025)
 
+import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:estocando/telas/tela_cadastro_parceiro.dart'; // Importamos o enum
+import 'package:estocando/telas/tela_cadastro_parceiro.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:dropdown_search/dropdown_search.dart';
+import 'package:intl/intl.dart';
 import '../models/movimentacao.dart';
 
+// Classe de formatação de moeda (reutilizada do cadastro de produto)
+class CurrencyInputFormatter extends TextInputFormatter {
+  final int maxDigitsBeforeDecimal;
+
+  CurrencyInputFormatter({this.maxDigitsBeforeDecimal = 7});
+
+  @override
+  TextEditingValue formatEditUpdate(TextEditingValue oldValue, TextEditingValue newValue) {
+    String newText = newValue.text.replaceAll(RegExp(r'[^0-9]'), '');
+    if (newText.isEmpty) return newValue.copyWith(text: '');
+
+    if (newText.length > maxDigitsBeforeDecimal + 2) {
+      return oldValue;
+    }
+
+    double value = double.parse(newText) / 100;
+    final formatter = NumberFormat.currency(locale: 'pt_BR', symbol: 'R\$ ');
+    String formattedText = formatter.format(value);
+
+    return newValue.copyWith(
+      text: formattedText,
+      selection: TextSelection.collapsed(offset: formattedText.length),
+    );
+  }
+}
+
 class TelaMovimentacao extends StatefulWidget {
-  const TelaMovimentacao({super.key});
+  final QueryDocumentSnapshot? produtoPreSelecionado;
+  const TelaMovimentacao({super.key, this.produtoPreSelecionado});
 
   @override
   State<TelaMovimentacao> createState() => _TelaMovimentacaoState();
@@ -17,22 +45,23 @@ class TelaMovimentacao extends StatefulWidget {
 class _TelaMovimentacaoState extends State<TelaMovimentacao> {
   final _formKey = GlobalKey<FormState>();
 
-  // --- VARIÁVEIS DE ESTADO ATUALIZADAS ---
   QueryDocumentSnapshot? _produtoDocSelecionado;
-  QueryDocumentSnapshot? _parceiroDocSelecionado; // REATIVADO
-
+  QueryDocumentSnapshot? _parceiroDocSelecionado;
   TipoMovimentacao _tipoMovimentacao = TipoMovimentacao.entrada;
   String? _subtipoSelecionado;
 
   List<QueryDocumentSnapshot> _listaDeProdutos = [];
-  List<QueryDocumentSnapshot> _listaDeParceiros = []; // ADICIONADO
-  bool _carregandoDados = true; // Unificamos o loading
+  List<QueryDocumentSnapshot> _listaDeParceiros = [];
+  bool _carregandoDados = true;
   bool _isSalvando = false;
 
   final List<String> _subtiposEntrada = const ['COMPRA', 'Devolução', 'Acerto de estoque'];
   final List<String> _subtiposSaida = const ['Venda', 'OS', 'Itau', 'Colaborador'];
 
+  final _produtoAutocompleteController = TextEditingController();
+  final _parceiroAutocompleteController = TextEditingController();
   final _qtdController = TextEditingController();
+  final _valorCompraController = TextEditingController();
   final _numeroNfController = TextEditingController();
   final _devolvidoPorController = TextEditingController();
   final _motivoAcertoController = TextEditingController();
@@ -44,22 +73,59 @@ class _TelaMovimentacaoState extends State<TelaMovimentacao> {
   @override
   void initState() {
     super.initState();
+    if (widget.produtoPreSelecionado != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          _setProdutoSelecionado(widget.produtoPreSelecionado);
+        }
+      });
+    }
     _carregarDadosIniciais();
   }
 
-  // --- FUNÇÃO DE CARREGAMENTO ATUALIZADA ---
+  @override
+  void dispose() {
+    _produtoAutocompleteController.dispose();
+    _parceiroAutocompleteController.dispose();
+    _qtdController.dispose();
+    _valorCompraController.dispose();
+    _numeroNfController.dispose();
+    _devolvidoPorController.dispose();
+    _motivoAcertoController.dispose();
+    _numeroOsController.dispose();
+    _agenciaController.dispose();
+    _colaboradorController.dispose();
+    _centroDeCustoController.dispose();
+    super.dispose();
+  }
+
+  void _setProdutoSelecionado(QueryDocumentSnapshot? produtoDoc) {
+    setState(() {
+      _produtoDocSelecionado = produtoDoc;
+      if (produtoDoc != null) {
+        final data = produtoDoc.data() as Map<String, dynamic>;
+        _produtoAutocompleteController.text = "${data['codigo']} - ${data['nome']}";
+
+        double valorInicial = (data['valor'] ?? 0.0).toDouble();
+        _valorCompraController.text = NumberFormat.currency(locale: 'pt_BR', symbol: 'R\$ ').format(valorInicial);
+
+      } else {
+        _produtoAutocompleteController.clear();
+        _valorCompraController.clear();
+      }
+    });
+  }
+
   Future<void> _carregarDadosIniciais() async {
     try {
       final db = FirebaseFirestore.instance;
-      final produtosFuture = db.collection('produtos').orderBy('nome').get();
-      final parceirosFuture = db.collection('parceiros').orderBy('nome').get(); // ADICIONADO
-
+      final produtosFuture = db.collection('produtos').where('ativo', isEqualTo: true).orderBy('nome').get();
+      final parceirosFuture = db.collection('parceiros').orderBy('nome').get();
       final results = await Future.wait([produtosFuture, parceirosFuture]);
-
       if (mounted) {
         setState(() {
           _listaDeProdutos = results[0].docs;
-          _listaDeParceiros = results[1].docs; // ADICIONADO
+          _listaDeParceiros = results[1].docs;
           _carregandoDados = false;
         });
       }
@@ -71,72 +137,72 @@ class _TelaMovimentacaoState extends State<TelaMovimentacao> {
     }
   }
 
-  @override
-  void dispose() {
-    //TODO (Adicionar controllers) ... seus controllers ...
-    super.dispose();
-  }
-
   void _limparSelecoesDependentes() {
     setState(() {
       _subtipoSelecionado = null;
       _parceiroDocSelecionado = null;
+      _parceiroAutocompleteController.clear();
     });
   }
 
-  // --- FUNÇÃO DE SALVAR ATUALIZADA ---
   void _salvarMovimentacao() async {
-    if (_formKey.currentState!.validate() && !_isSalvando) {
+    if (_formKey.currentState!.validate()) {
+      if (_produtoDocSelecionado == null) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Erro: Selecione um produto válido da lista.'), backgroundColor: Colors.red));
+        return;
+      }
       setState(() { _isSalvando = true; });
-
       final db = FirebaseFirestore.instance;
       final produtoRef = db.collection('produtos').doc(_produtoDocSelecionado!.id);
-      final int quantidadeMovimentada = int.parse(_qtdController.text);
+
+      // O "PORQUÊ": A quantidade agora é lida como um double, trocando a vírgula do
+      // usuário por um ponto para que o Dart entenda o número corretamente.
+      final double quantidadeMovimentada = double.parse(_qtdController.text.replaceAll(',', '.'));
+      final double valorDaCompra = double.tryParse(_valorCompraController.text.replaceAll(RegExp(r'[^0-9,]'), '').replaceAll(',', '.')) ?? 0.0;
 
       try {
         await db.runTransaction((transaction) async {
           final produtoSnapshot = await transaction.get(produtoRef);
           if (!produtoSnapshot.exists) { throw Exception("Produto não encontrado!"); }
-
           final dadosProduto = produtoSnapshot.data() as Map<String, dynamic>;
-          final estoqueAtual = dadosProduto['quantidadeAtual'] as int;
-          int novoEstoque;
 
-          // Mapa para agrupar todas as atualizações no documento do produto
+          // O "PORQUÊ": Garantimos que o estoque atual seja lido como um double,
+          // não importa se no banco ele está salvo como inteiro ou decimal.
+          final estoqueAtual = (dadosProduto['quantidadeAtual'] ?? 0).toDouble();
+          double novoEstoque;
           final Map<String, dynamic> updateData = {};
 
           if (_tipoMovimentacao == TipoMovimentacao.saida) {
-            if (estoqueAtual < quantidadeMovimentada) { throw Exception('Estoque insuficiente! Saldo atual: $estoqueAtual'); }
+            // A comparação de estoque agora é feita com decimais.
+            if (estoqueAtual < quantidadeMovimentada) {
+              // A mensagem de erro agora formata o número para exibir corretamente.
+              throw Exception('Estoque insuficiente! Saldo atual: ${estoqueAtual.toStringAsFixed(3).replaceAll('.', ',')}');
+            }
             novoEstoque = estoqueAtual - quantidadeMovimentada;
-            updateData['quantidadeAtual'] = novoEstoque;
           } else {
             novoEstoque = estoqueAtual + quantidadeMovimentada;
-            updateData['quantidadeAtual'] = novoEstoque;
-
-            // --- INÍCIO DA CORREÇÃO ---
-            // Se for uma entrada, verifica se existe uma SC e a limpa.
             if (dadosProduto.containsKey('numeroSC') && dadosProduto['numeroSC'] != null) {
               updateData['numeroSC'] = null;
             }
-            // --- FIM DA CORREÇÃO ---
+            if (_subtipoSelecionado == 'COMPRA') {
+              updateData['valor'] = valorDaCompra;
+            }
           }
-
-          // Executa a atualização com todos os dados necessários
+          // O novo estoque é salvo como um double.
+          updateData['quantidadeAtual'] = novoEstoque;
           transaction.update(produtoRef, updateData);
-
-          // ADICIONADO: Pega os dados do parceiro selecionado
           final dadosParceiro = _parceiroDocSelecionado?.data() as Map<String, dynamic>?;
           final tipoParceiro = dadosParceiro != null ? TipoParceiro.values.byName(dadosParceiro['tipo']) : null;
-
           final novaMovimentacao = Movimentacao(
             produtoId: _produtoDocSelecionado!.id,
             produtoCodigo: dadosProduto['codigo'],
             produtoNome: dadosProduto['nome'],
             tipo: _tipoMovimentacao,
+            // A quantidade da movimentação também é salva como double.
             quantidade: quantidadeMovimentada,
             data: DateTime.now(),
             subTipo: _subtipoSelecionado,
-            // Lógica para salvar nome do cliente/fornecedor REATIVADA
+            valorUnitarioMovimentacao: (_tipoMovimentacao == TipoMovimentacao.entrada && _subtipoSelecionado == 'COMPRA') ? valorDaCompra : dadosProduto['valor'],
             nomeCliente: tipoParceiro == TipoParceiro.cliente ? dadosParceiro!['nome'] : null,
             nomeFornecedor: tipoParceiro == TipoParceiro.fornecedor ? dadosParceiro!['nome'] : null,
             numeroNF: _numeroNfController.text.trim().isNotEmpty ? _numeroNfController.text.trim() : null,
@@ -147,14 +213,11 @@ class _TelaMovimentacaoState extends State<TelaMovimentacao> {
             nomeColaborador: _colaboradorController.text.trim().isNotEmpty ? _colaboradorController.text.trim() : null,
             centroDeCusto: _centroDeCustoController.text.trim().isNotEmpty ? _centroDeCustoController.text.trim() : null,
           );
-
           final movimentacaoRef = db.collection('movimentacoes').doc();
           transaction.set(movimentacaoRef, novaMovimentacao.toJson());
         });
-
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Movimentação salva com sucesso!'), backgroundColor: Colors.green));
         if (mounted) Navigator.of(context).pop();
-
       } catch (e) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Erro: ${e.toString().replaceAll("Exception: ", "")}'), backgroundColor: Colors.red));
       } finally {
@@ -162,10 +225,11 @@ class _TelaMovimentacaoState extends State<TelaMovimentacao> {
       }
     }
   }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Registrar Movimentação'), backgroundColor: Colors.blueGrey),
+      appBar: AppBar(title: const Text('Registrar Movimentação')),
       body: SingleChildScrollView(
         child: Padding(
           padding: const EdgeInsets.all(16.0),
@@ -174,7 +238,7 @@ class _TelaMovimentacaoState extends State<TelaMovimentacao> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                _buildSelecaoProduto(),
+                _buildSelecaoProdutoAutocomplete(),
                 const SizedBox(height: 20),
                 _buildTipoMovimentacao(),
                 const SizedBox(height: 20),
@@ -186,7 +250,7 @@ class _TelaMovimentacaoState extends State<TelaMovimentacao> {
                 const SizedBox(height: 30),
                 ElevatedButton(
                   onPressed: _salvarMovimentacao,
-                  style: ElevatedButton.styleFrom(backgroundColor: Colors.blueGrey, padding: const EdgeInsets.symmetric(vertical: 20), textStyle: const TextStyle(fontSize: 18)),
+                  style: ElevatedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 20), textStyle: const TextStyle(fontSize: 18)),
                   child: _isSalvando ? const CircularProgressIndicator(color: Colors.white) : const Text('Salvar Movimentação'),
                 ),
               ],
@@ -197,78 +261,203 @@ class _TelaMovimentacaoState extends State<TelaMovimentacao> {
     );
   }
 
-  Widget _buildSelecaoProduto() { /* ... sem alterações ... */
-    return DropdownSearch<QueryDocumentSnapshot>(enabled: !_carregandoDados, popupProps: PopupProps.menu(showSearchBox: true, searchFieldProps: TextFieldProps(decoration: InputDecoration(labelText: 'Buscar produto por código ou nome', prefixIcon: Icon(Icons.search))), emptyBuilder: (context, searchEntry) => const Center(child: Text('Nenhum produto encontrado')), ), items: _listaDeProdutos, itemAsString: (QueryDocumentSnapshot doc) { final data = doc.data() as Map<String, dynamic>; return '${data['codigo']} - ${data['nome']}'; }, dropdownDecoratorProps: DropDownDecoratorProps(dropdownSearchDecoration: InputDecoration(labelText: _carregandoDados ? 'Carregando...' : 'Produto', border: const OutlineInputBorder(), ), ), onChanged: (QueryDocumentSnapshot? doc) => setState(() => _produtoDocSelecionado = doc), selectedItem: _produtoDocSelecionado, validator: (doc) => doc == null ? "É obrigatório selecionar um produto." : null, );
-  }
+  Widget _buildSelecaoProdutoAutocomplete() {
+    return Autocomplete<QueryDocumentSnapshot>(
+      displayStringForOption: (option) {
+        final data = option.data() as Map<String, dynamic>;
+        return '${data['codigo']} - ${data['nome']}';
+      },
+      fieldViewBuilder: (context, textEditingController, focusNode, onFieldSubmitted) {
+        if (_produtoAutocompleteController.text.isNotEmpty && textEditingController.text.isEmpty) {
+          textEditingController.text = _produtoAutocompleteController.text;
+        }
 
-  Widget _buildTipoMovimentacao() { /* ... sem alterações ... */
-    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [ const Text('Tipo de Movimentação:', style: TextStyle(fontSize: 16)), Row(children: [ Expanded(child: RadioListTile<TipoMovimentacao>(title: const Text('Entrada'), value: TipoMovimentacao.entrada, groupValue: _tipoMovimentacao, onChanged: (value) { if (value != null) { setState(() { _tipoMovimentacao = value; _limparSelecoesDependentes(); }); } }, ), ), Expanded(child: RadioListTile<TipoMovimentacao>(title: const Text('Saída'), value: TipoMovimentacao.saida, groupValue: _tipoMovimentacao, onChanged: (value) { if (value != null) { setState(() { _tipoMovimentacao = value; _limparSelecoesDependentes(); }); } },),), ], ), ],);
-  }
-
-  Widget _buildSubtipoDropdown() { /* ... sem alterações ... */
-    List<String> itens = _tipoMovimentacao == TipoMovimentacao.entrada ? _subtiposEntrada : _subtiposSaida; return DropdownButtonFormField<String>(value: _subtipoSelecionado, hint: const Text('Destino / Motivo'), isExpanded: true, items: itens.map((String valor) => DropdownMenuItem<String>(value: valor, child: Text(valor))).toList(), onChanged: (v) => setState(() => _subtipoSelecionado = v), validator: (v) => v == null ? 'Selecione uma opção' : null, decoration: const InputDecoration(border: OutlineInputBorder()),);
-  }
-
-  Widget _buildCampoQuantidade() { /* ... sem alterações ... */
-    return TextFormField(controller: _qtdController, decoration: const InputDecoration(labelText: 'Quantidade', border: OutlineInputBorder()), keyboardType: TextInputType.number, inputFormatters: [FilteringTextInputFormatter.digitsOnly], validator: (t) => (t == null || t.isEmpty || int.parse(t) <= 0) ? 'Quantidade inválida' : null);
-  }
-
-  // WIDGET PARA SELECIONAR PARCEIRO (REATIVADO E AJUSTADO)
-  Widget _buildDropdownParceiro(TipoParceiro tipo) {
-    final String label = tipo == TipoParceiro.cliente ? 'Cliente' : 'Fornecedor';
-    final List<QueryDocumentSnapshot> listaFiltrada = _listaDeParceiros.where((doc) {
-      final data = doc.data() as Map<String, dynamic>;
-      return data['tipo'] == tipo.name;
-    }).toList();
-
-    return Padding(
-      padding: const EdgeInsets.only(top: 10.0),
-      child: DropdownSearch<QueryDocumentSnapshot>(
-        enabled: !_carregandoDados,
-        popupProps: PopupProps.menu(
-          showSearchBox: true,
-          searchFieldProps: TextFieldProps(decoration: InputDecoration(labelText: 'Buscar por nome ou CNPJ')),
-          emptyBuilder: (context, search) => Center(child: Text('Nenhum $label encontrado.')),
-        ),
-        items: listaFiltrada,
-        itemAsString: (QueryDocumentSnapshot doc) {
-          final data = doc.data() as Map<String, dynamic>;
-          final nome = data['nome'] ?? '';
-          final cnpj = data['cnpj'] ?? '';
-          return '$nome${cnpj.isNotEmpty ? " - $cnpj" : ""}';
-        },
-        dropdownDecoratorProps: DropDownDecoratorProps(
-          dropdownSearchDecoration: InputDecoration(labelText: label, border: const OutlineInputBorder()),
-        ),
-        onChanged: (QueryDocumentSnapshot? doc) => setState(() => _parceiroDocSelecionado = doc),
-        selectedItem: _parceiroDocSelecionado,
-        validator: (doc) => doc == null ? 'É obrigatório selecionar um $label.' : null,
-      ),
+        return TextFormField(
+          controller: textEditingController,
+          focusNode: focusNode,
+          decoration: InputDecoration(
+            labelText: _carregandoDados ? 'Carregando Produtos...' : 'Produto',
+            border: const OutlineInputBorder(),
+            suffixIcon: IconButton(
+              icon: const Icon(Icons.clear),
+              onPressed: () {
+                textEditingController.clear();
+                _setProdutoSelecionado(null);
+              },
+            ),
+          ),
+          validator: (value) {
+            if (value != null && value.isNotEmpty && _produtoDocSelecionado == null) {
+              return 'Selecione um produto válido da lista.';
+            }
+            if (value == null || value.isEmpty) {
+              return 'O produto é obrigatório.';
+            }
+            return null;
+          },
+        );
+      },
+      optionsBuilder: (TextEditingValue textEditingValue) {
+        final query = textEditingValue.text.toLowerCase();
+        if (query.isEmpty) return const Iterable<QueryDocumentSnapshot>.empty();
+        return _listaDeProdutos.where((option) {
+          final data = option.data() as Map<String, dynamic>;
+          final nome = (data['nome'] ?? '').toLowerCase();
+          final codigo = (data['codigo'] ?? '').toLowerCase();
+          return nome.contains(query) || codigo.contains(query);
+        });
+      },
+      onSelected: (selection) {
+        FocusScope.of(context).unfocus();
+        _setProdutoSelecionado(selection);
+      },
     );
   }
 
-  Widget _buildCampoCentroDeCusto() { /* ... sem alterações ... */
-    return TextFormField(controller: _centroDeCustoController, decoration: const InputDecoration(labelText: 'Centro de Custo'), keyboardType: TextInputType.number, inputFormatters: [FilteringTextInputFormatter.digitsOnly]);
+  Widget _buildTipoMovimentacao() {
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      const Text('Tipo de Movimentação:', style: TextStyle(fontSize: 16)),
+      Row(children: [
+        Expanded(child: RadioListTile<TipoMovimentacao>(title: const Text('Entrada'), value: TipoMovimentacao.entrada, groupValue: _tipoMovimentacao, onChanged: (v) { if (v != null) setState(() { _tipoMovimentacao = v; _limparSelecoesDependentes(); }); },)),
+        Expanded(child: RadioListTile<TipoMovimentacao>(title: const Text('Saída'), value: TipoMovimentacao.saida, groupValue: _tipoMovimentacao, onChanged: (v) { if (v != null) setState(() { _tipoMovimentacao = v; _limparSelecoesDependentes(); }); },)),
+      ])
+    ]);
   }
 
-  // WIDGET DOS CAMPOS CONDICIONAIS (REATIVADO)
+  Widget _buildSubtipoDropdown() {
+    return DropdownButtonFormField<String>(value: _subtipoSelecionado, hint: const Text('Destino / Motivo'), isExpanded: true, items: (_tipoMovimentacao == TipoMovimentacao.entrada ? _subtiposEntrada : _subtiposSaida).map((String v) => DropdownMenuItem<String>(value: v, child: Text(v))).toList(), onChanged: (v) => setState(() => _subtipoSelecionado = v), validator: (v) => v == null ? 'Selecione uma opção' : null, decoration: const InputDecoration(border: OutlineInputBorder()));
+  }
+
+  Widget _buildCampoQuantidade() {
+    // O "PORQUÊ": Este widget foi completamente atualizado para aceitar decimais.
+    return TextFormField(
+      controller: _qtdController,
+      decoration: const InputDecoration(
+          labelText: 'Quantidade', border: OutlineInputBorder()),
+      // 1. Teclado para decimais
+      keyboardType: const TextInputType.numberWithOptions(decimal: true),
+      inputFormatters: [
+        // 2. Filtro que permite números e UMA vírgula.
+        FilteringTextInputFormatter.allow(RegExp(r'^\d+\,?\d{0,3}')),
+        LengthLimitingTextInputFormatter(10)
+      ],
+      validator: (t) {
+        if (t == null || t.isEmpty) return 'Quantidade inválida';
+        // 3. Validação que checa se o valor é um decimal maior que zero.
+        final valor = double.tryParse(t.replaceAll(',', '.')) ?? 0.0;
+        if (valor <= 0) return 'A quantidade deve ser maior que zero';
+        return null;
+      },
+    );
+  }
+
+  Widget _buildParceiroAutocomplete(TipoParceiro tipo) {
+    final String label = tipo == TipoParceiro.cliente ? 'Cliente' : 'Fornecedor';
+    final List<QueryDocumentSnapshot> listaFiltrada = _listaDeParceiros.where((doc) => (doc.data() as Map<String, dynamic>)['tipo'] == tipo.name).toList();
+    return Autocomplete<QueryDocumentSnapshot>(
+      displayStringForOption: (option) => (option.data() as Map<String, dynamic>)['nome'] ?? '',
+      fieldViewBuilder: (context, textEditingController, focusNode, onFieldSubmitted) {
+        return TextFormField(
+          controller: textEditingController,
+          focusNode: focusNode,
+          decoration: InputDecoration(
+            labelText: _carregandoDados ? 'Carregando...' : label,
+            border: const OutlineInputBorder(),
+            suffixIcon: IconButton(
+              icon: const Icon(Icons.clear),
+              onPressed: () {
+                textEditingController.clear();
+                setState(() { _parceiroDocSelecionado = null; });
+              },
+            ),
+          ),
+          validator: (value) {
+            if (value != null && value.isNotEmpty && _parceiroDocSelecionado == null) return 'Selecione um $label válido da lista.';
+            if (value == null || value.isEmpty) return 'O $label é obrigatório.';
+            return null;
+          },
+        );
+      },
+      optionsBuilder: (TextEditingValue textEditingValue) {
+        final query = textEditingValue.text.toLowerCase();
+        if (query.isEmpty) return const Iterable<QueryDocumentSnapshot>.empty();
+        return listaFiltrada.where((option) {
+          final data = option.data() as Map<String, dynamic>;
+          final nome = (data['nome'] ?? '').toLowerCase();
+          final codigo = (data['codigo'] ?? '').toLowerCase();
+          return nome.contains(query) || codigo.contains(query);
+        });
+      },
+      onSelected: (selection) {
+        FocusScope.of(context).unfocus();
+        setState(() { _parceiroDocSelecionado = selection; });
+      },
+    );
+  }
+
+  Widget _buildCampoCentroDeCusto() {
+    return TextFormField(controller: _centroDeCustoController, decoration: const InputDecoration(labelText: 'Centro de Custo'), keyboardType: TextInputType.number, inputFormatters: [FilteringTextInputFormatter.digitsOnly, LengthLimitingTextInputFormatter(7)]);
+  }
+
+  Widget _buildCampoValorCompra() {
+    return TextFormField(
+      controller: _valorCompraController,
+      decoration: const InputDecoration(labelText: 'Valor Unitário da Compra'),
+      keyboardType: const TextInputType.numberWithOptions(decimal: true),
+      inputFormatters: [CurrencyInputFormatter(maxDigitsBeforeDecimal: 7)],
+      validator: (v) {
+        if (v == null || v.isEmpty) return 'O valor é obrigatório';
+        final valor = double.tryParse(v.replaceAll(RegExp(r'[^0-9,]'), '').replaceAll(',', '.')) ?? 0.0;
+        if (valor <= 0) return 'Valor deve ser maior que zero';
+        return null;
+      },
+    );
+  }
+
   Widget _buildCamposCondicionais() {
     if (_subtipoSelecionado == null) return const SizedBox.shrink();
     switch (_subtipoSelecionado) {
       case 'COMPRA':
-        return Column(children: [TextFormField(controller: _numeroNfController, decoration: const InputDecoration(labelText: 'Número da NF')), _buildDropdownParceiro(TipoParceiro.fornecedor)]);
+        return Column(children: [
+          const SizedBox(height: 10),
+          _buildCampoValorCompra(),
+          const SizedBox(height: 10),
+          TextFormField(controller: _numeroNfController, decoration: const InputDecoration(labelText: 'Número da NF'), keyboardType: TextInputType.number, inputFormatters: [FilteringTextInputFormatter.digitsOnly, LengthLimitingTextInputFormatter(9)]),
+          const SizedBox(height: 10),
+          _buildParceiroAutocomplete(TipoParceiro.fornecedor)
+        ]);
       case 'Devolução':
         return TextFormField(controller: _devolvidoPorController, decoration: const InputDecoration(labelText: 'Nome de quem devolveu'));
       case 'Acerto de estoque':
         return TextFormField(controller: _motivoAcertoController, decoration: const InputDecoration(labelText: 'Motivo do acerto'));
       case 'Venda':
-        return Column(children: [TextFormField(controller: _numeroNfController, decoration: const InputDecoration(labelText: 'Número da NF')), _buildDropdownParceiro(TipoParceiro.cliente), const SizedBox(height: 10), _buildCampoCentroDeCusto()]);
+        return Column(children: [
+          TextFormField(controller: _numeroNfController, decoration: const InputDecoration(labelText: 'Número da NF'), keyboardType: TextInputType.number, inputFormatters: [FilteringTextInputFormatter.digitsOnly, LengthLimitingTextInputFormatter(9)]),
+          const SizedBox(height: 10),
+          _buildParceiroAutocomplete(TipoParceiro.cliente),
+          const SizedBox(height: 10),
+          _buildCampoCentroDeCusto()
+        ]);
       case 'OS':
-        return Column(children: [TextFormField(controller: _numeroOsController, decoration: const InputDecoration(labelText: 'Número da OS')), _buildDropdownParceiro(TipoParceiro.cliente), const SizedBox(height: 10), _buildCampoCentroDeCusto()]);
+        return Column(children: [
+          TextFormField(controller: _numeroOsController, decoration: const InputDecoration(labelText: 'Número da OS'), keyboardType: TextInputType.number, inputFormatters: [FilteringTextInputFormatter.digitsOnly, LengthLimitingTextInputFormatter(7)]),
+          const SizedBox(height: 10),
+          _buildParceiroAutocomplete(TipoParceiro.cliente),
+          const SizedBox(height: 10),
+          _buildCampoCentroDeCusto()
+        ]);
       case 'Itau':
-        return Column(children: [TextFormField(controller: _agenciaController, decoration: const InputDecoration(labelText: 'Número da AG')), const SizedBox(height: 10), _buildCampoCentroDeCusto()]);
+        return Column(children: [
+          TextFormField(controller: _agenciaController, decoration: const InputDecoration(labelText: 'Número da AG'), keyboardType: TextInputType.number, inputFormatters: [FilteringTextInputFormatter.digitsOnly, LengthLimitingTextInputFormatter(7)]),
+          const SizedBox(height: 10),
+          _buildCampoCentroDeCusto()
+        ]);
       case 'Colaborador':
-        return Column(children: [TextFormField(controller: _colaboradorController, decoration: const InputDecoration(labelText: 'Nome do Colaborador')), const SizedBox(height: 10), _buildCampoCentroDeCusto()]);
+        return Column(children: [
+          TextFormField(controller: _colaboradorController, decoration: const InputDecoration(labelText: 'Nome do Colaborador')),
+          const SizedBox(height: 10),
+          _buildCampoCentroDeCusto()
+        ]);
       default:
         return const SizedBox.shrink();
     }

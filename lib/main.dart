@@ -1,4 +1,6 @@
+import 'package:estocando/telas/tela_home.dart';
 import 'package:estocando/telas/tela_login.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'firebase_options.dart';
@@ -19,14 +21,11 @@ class MyApp extends StatelessWidget {
   Widget build(BuildContext context) {
     const Color azulProtecin = Color.fromRGBO(17, 52, 82, 1);
     const Color vermelhoProtecin = Color.fromRGBO(190, 32, 40, 1);
-
-    // Usamos o tema base para poder mesclar com a nova fonte
     final textTheme = Theme.of(context).textTheme;
 
     return MaterialApp(
       debugShowCheckedModeBanner: false,
       title: 'Estocando PROTECIN',
-
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(
           seedColor: azulProtecin,
@@ -34,27 +33,47 @@ class MyApp extends StatelessWidget {
           secondary: vermelhoProtecin,
           error: vermelhoProtecin,
         ),
-
         appBarTheme: const AppBarTheme(
           backgroundColor: azulProtecin,
           foregroundColor: Colors.white,
         ),
-
         floatingActionButtonTheme: const FloatingActionButtonThemeData(
           backgroundColor: vermelhoProtecin,
           foregroundColor: Colors.white,
         ),
-
-        // MODIFICAÇÃO: Usando a fonte "Muli" (Mulish), uma alternativa visualmente similar
-        // O método 'mulishTextTheme' existe e funciona corretamente.
         textTheme: GoogleFonts.mulishTextTheme(textTheme).copyWith(
           titleLarge: GoogleFonts.mulish(textStyle: textTheme.titleLarge, fontWeight: FontWeight.bold),
           titleMedium: GoogleFonts.mulish(textStyle: textTheme.titleMedium, fontWeight: FontWeight.bold),
         ),
-
         useMaterial3: true,
       ),
-      home: const TelaLogin(),
+
+      home: StreamBuilder<User?>(
+        stream: FirebaseAuth.instance.authStateChanges(),
+        builder: (context, snapshot) {
+          // ================== CÓDIGO DE DEPURAÇÃO ==================
+          // Estas linhas nos dirão o que o StreamBuilder está "vendo"
+          print('--- VIGIA DE AUTENTICAÇÃO ATIVADO ---');
+          print('Estado da Conexão: ${snapshot.connectionState}');
+          if (snapshot.hasData) {
+            print('Resultado: Usuário LOGADO. ID: ${snapshot.data!.uid}');
+          } else if (snapshot.hasError) {
+            print('Resultado: Ocorreu um ERRO no stream: ${snapshot.error}');
+          } else {
+            print('Resultado: Usuário DESLOGADO.');
+          }
+          print('-----------------------------------------');
+          // ==========================================================
+
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return const Scaffold(body: Center(child: CircularProgressIndicator()));
+          }
+          if (snapshot.hasData) {
+            return const TelaHome();
+          }
+          return const TelaLogin();
+        },
+      ),
     );
   }
 }
