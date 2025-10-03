@@ -1,7 +1,7 @@
-// CÓDIGO ATUALIZADO COM AUTOCOMPLETE E TODOS OS CARDS E FUNÇÕES
+// CÓDIGO ATUALIZADO COM CORREÇÃO PARA NÚMEROS DECIMAIS (double)
 
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:estocando/telas/tela_cadastro_parceiro.dart';
+import 'package:estocando/telas/tela_cadastro_parceiro.dart'; // Você pode remover este import se não for usado.
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
@@ -14,7 +14,8 @@ class _ProdutoValor {
 class ProdutoComEstoqueHistorico {
   final String codigo;
   final String nome;
-  final int quantidade;
+  // ---> MUDANÇA 1: A quantidade agora é 'double' para aceitar decimais.
+  final double quantidade;
   final double custoUnitario;
   final double custoTotal;
 
@@ -53,6 +54,87 @@ class _TelaRelatoriosState extends State<TelaRelatorios> {
     super.dispose();
   }
 
+  // ---> MUDANÇA 2: Ajustes cruciais na função de cálculo histórico para usar 'double'.
+  List<ProdutoComEstoqueHistorico> _calcularEstoqueHistorico(List<QueryDocumentSnapshot> produtos, List<QueryDocumentSnapshot> movimentacoes, DateTime? dataAlvo) {
+    if (dataAlvo == null) return [];
+
+    // O mapa de quantidades agora armazena 'double'.
+    final Map<String, double> quantidades = {
+      for (var p in produtos) p.id: ((p.data() as Map<String, dynamic>)['quantidadeAtual'] ?? 0).toDouble()
+    };
+
+    final dataAlvoFimDoDia = DateTime(dataAlvo.year, dataAlvo.month, dataAlvo.day, 23, 59, 59);
+
+    final movimentacoesFuturas = movimentacoes.where((doc) {
+      final data = doc.data() as Map<String, dynamic>;
+      try {
+        final dataMov = DateTime.parse(data['data']);
+        return dataMov.isAfter(dataAlvoFimDoDia);
+      } catch (e) {
+        return false;
+      }
+    });
+
+    for (var movDoc in movimentacoesFuturas) {
+      final movData = movDoc.data() as Map<String, dynamic>;
+      final produtoId = movData['produtoId'];
+      // A quantidade da movimentação agora é lida como 'double'.
+      final double quantidade = (movData['quantidade'] ?? 0).toDouble();
+      final tipo = movData['tipo'];
+
+      if (quantidades.containsKey(produtoId)) {
+        if (tipo == 'entrada') {
+          quantidades[produtoId] = quantidades[produtoId]! - quantidade;
+        } else {
+          quantidades[produtoId] = quantidades[produtoId]! + quantidade;
+        }
+      }
+    }
+
+    final List<ProdutoComEstoqueHistorico> produtosHistoricos = [];
+    for (var p in produtos) {
+      final pData = p.data() as Map<String, dynamic>;
+      final double quantidadeHistorica = quantidades[p.id] ?? 0.0;
+
+      if (quantidadeHistorica > 0.0001) { // Usamos uma pequena margem para evitar problemas de arredondamento de double
+        produtosHistoricos.add(
+          ProdutoComEstoqueHistorico(
+            codigo: pData['codigo'] ?? 'N/A',
+            nome: pData['nome'] ?? 'N/A',
+            quantidade: quantidadeHistorica,
+            custoUnitario: (pData['valor'] ?? 0.0).toDouble(),
+          ),
+        );
+      }
+    }
+    return produtosHistoricos;
+  }
+
+  // ---> MUDANÇA 3: Pequeno ajuste na função de revenda para usar 'double'.
+  Map<String, dynamic> _calcularEstoqueRevenda(List<QueryDocumentSnapshot> produtos, List<ProdutoComEstoqueHistorico>? listaProdutosHistoricos) {
+    final idsProdutosRevenda = produtos.where((doc) => (doc.data() as Map<String, dynamic>)['grupo'] == 'REVENDA').map((doc) => doc.id).toSet();
+    List<ProdutoComEstoqueHistorico> itensRevenda;
+    if (listaProdutosHistoricos != null) {
+      final produtosMap = {for (var p in produtos) (p.data() as Map<String,dynamic>)['codigo'] : p.id};
+      itensRevenda = listaProdutosHistoricos.where((p) {
+        final produtoId = produtosMap[p.codigo];
+        return produtoId != null && idsProdutosRevenda.contains(produtoId);
+      }).toList();
+    } else {
+      itensRevenda = produtos.where((p) => idsProdutosRevenda.contains(p.id) && ((p.data() as Map<String, dynamic>)['quantidadeAtual'] ?? 0).toDouble() > 0).map((p) {
+        final pData = p.data() as Map<String, dynamic>;
+        return ProdutoComEstoqueHistorico(
+          codigo: pData['codigo'] ?? 'N/A',
+          nome: pData['nome'] ?? 'N/A',
+          quantidade: (pData['quantidadeAtual'] ?? 0).toDouble(),
+          custoUnitario: (pData['valor'] ?? 0.0).toDouble(),
+        );
+      }).toList();
+    }
+    final double valorTotalRevenda = itensRevenda.fold(0.0, (total, item) => total + item.custoTotal);
+    return {'valorTotalRevenda': valorTotalRevenda, 'itensRevenda': itensRevenda};
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -66,7 +148,7 @@ class _TelaRelatoriosState extends State<TelaRelatorios> {
           if (snapshot.hasError) {
             return Center(child: Text('Erro ao carregar dados: ${snapshot.error}'));
           }
-          if (!snapshot.hasData || !snapshot.data!.isNotEmpty) {
+          if (!snapshot.hasData || snapshot.data == null || snapshot.data!.isEmpty) {
             return const Center(child: Text('Nenhum dado encontrado.'));
           }
 
@@ -74,7 +156,11 @@ class _TelaRelatoriosState extends State<TelaRelatorios> {
           final movimentacoes = snapshot.data!['movimentacoes']!.docs;
           final parceiros = snapshot.data!['parceiros']!.docs;
 
-          final List<QueryDocumentSnapshot> clientes = parceiros.where((doc) => (doc.data() as Map<String, dynamic>)['tipo'] == TipoParceiro.cliente.name).toList();
+          final List<QueryDocumentSnapshot> clientes = parceiros.where((doc) {
+            final data = doc.data() as Map<String, dynamic>;
+            return data['tipo'] == 'cliente';
+          }).toList();
+
           final List<ProdutoComEstoqueHistorico> produtosHistoricos = _calcularEstoqueHistorico(produtos, movimentacoes, _dataHistoricaSelecionada);
           final double valorTotalHistorico = produtosHistoricos.fold(0.0, (previousValue, produto) => previousValue + produto.custoTotal);
           final Map<String, double> valoresProdutos = { for (var p in produtos) p.id: (p.data() as Map<String, dynamic>)['valor'] ?? 0.0 };
@@ -83,8 +169,8 @@ class _TelaRelatoriosState extends State<TelaRelatorios> {
           final qtdPontoPedido = _contarProdutosPontoDePedido(produtos);
           final gastosPorCC = _calcularGastoPorCentroDeCusto(movimentacoes, valoresProdutos, _dataInicio, _dataFim);
           final curvaABC = _calcularCurvaABC(movimentacoes, valoresProdutos);
-          final consumoPorCliente = _calcularConsumoPorCliente(movimentacoes);
-          final relatorioRevenda = _calcularEstoqueRevenda(produtos, _dataHistoricaSelecionada != null ? produtosHistoricos : null, movimentacoes);
+          final consumoPorCliente = _calcularConsumoPorCliente(movimentacoes, produtos);
+          final relatorioRevenda = _calcularEstoqueRevenda(produtos, _dataHistoricaSelecionada != null ? produtosHistoricos : null);
           final totalSaidasItau = _calcularSaidasItau(movimentacoes, valoresProdutos, _dataInicio, _dataFim);
 
           return SingleChildScrollView(
@@ -284,7 +370,7 @@ class _TelaRelatoriosState extends State<TelaRelatorios> {
                           children: entryOS.value.entries.map((entryProduto) => ListTile(
                             dense: true,
                             title: Text(entryProduto.key),
-                            trailing: Text('${entryProduto.value} un'),
+                            trailing: Text('${entryProduto.value.toStringAsFixed(3).replaceAll('.', ',')} un'),
                           )).toList(),
                         )),
                     ],
@@ -343,71 +429,19 @@ class _TelaRelatoriosState extends State<TelaRelatorios> {
     return { 'produtos': results[0], 'movimentacoes': results[1], 'parceiros': results[2] };
   }
 
-  List<ProdutoComEstoqueHistorico> _calcularEstoqueHistorico(List<QueryDocumentSnapshot> produtos, List<QueryDocumentSnapshot> movimentacoes, DateTime? dataAlvo) {
-    if (dataAlvo == null) return [];
-    final Map<String, int> quantidades = { for (var p in produtos) p.id: (p.data() as Map<String, dynamic>)['quantidadeAtual'] ?? 0 };
-    final dataAlvoFimDoDia = DateTime(dataAlvo.year, dataAlvo.month, dataAlvo.day, 23, 59, 59);
-    final movimentacoesFuturas = movimentacoes.where((doc) {
-      final data = doc.data() as Map<String, dynamic>;
-      final dataMov = DateTime.parse(data['data']);
-      return dataMov.isAfter(dataAlvoFimDoDia);
-    });
-    for (var movDoc in movimentacoesFuturas) {
-      final movData = movDoc.data() as Map<String, dynamic>;
-      final produtoId = movData['produtoId'];
-      final quantidade = movData['quantidade'] as int;
-      final tipo = movData['tipo'];
-      if (quantidades.containsKey(produtoId)) {
-        if (tipo == 'entrada') {
-          quantidades[produtoId] = quantidades[produtoId]! - quantidade;
-        } else {
-          quantidades[produtoId] = quantidades[produtoId]! + quantidade;
-        }
-      }
-    }
-    final List<ProdutoComEstoqueHistorico> produtosHistoricos = [];
-    for (var p in produtos) {
-      final pData = p.data() as Map<String, dynamic>;
-      final quantidadeHistorica = quantidades[p.id] ?? 0;
-      if (quantidadeHistorica > 0) {
-        produtosHistoricos.add(
-          ProdutoComEstoqueHistorico(
-            codigo: pData['codigo'] ?? 'N/A',
-            nome: pData['nome'] ?? 'N/A',
-            quantidade: quantidadeHistorica,
-            custoUnitario: (pData['valor'] ?? 0.0).toDouble(),
-          ),
-        );
-      }
-    }
-    return produtosHistoricos;
-  }
-
-  Future<void> _selecionarData(BuildContext context, {required bool isDataInicio}) async {
-    final dataSelecionada = await showDatePicker(context: context, initialDate: DateTime.now(), firstDate: DateTime(2020), lastDate: DateTime.now().add(const Duration(days: 365)));
-    if (dataSelecionada != null) {
-      setState(() { if (isDataInicio) { _dataInicio = dataSelecionada; } else { _dataFim = dataSelecionada; } });
-    }
-  }
-
-  void _limparFiltroDePeriodo() {
-    setState(() {
-      _dataInicio = null;
-      _dataFim = null;
-    });
-  }
-
   double _calcularValorTotalEstoque(List<QueryDocumentSnapshot> produtos) {
     return produtos.fold(0.0, (total, doc) {
       final data = doc.data() as Map<String, dynamic>;
-      return total + ((data['quantidadeAtual'] ?? 0) * (data['valor'] ?? 0.0));
+      return total + (((data['quantidadeAtual'] ?? 0).toDouble()) * ((data['valor'] ?? 0.0).toDouble()));
     });
   }
 
   int _contarProdutosPontoDePedido(List<QueryDocumentSnapshot> produtos) {
     return produtos.where((doc) {
       final data = doc.data() as Map<String, dynamic>;
-      return (data['quantidadeAtual'] ?? 0) <= (data['estoqueMinimo'] ?? 0);
+      final double quantidadeAtual = (data['quantidadeAtual'] ?? 0).toDouble();
+      final double estoqueMinimo = (data['estoqueMinimo'] ?? 0).toDouble();
+      return quantidadeAtual <= estoqueMinimo && estoqueMinimo > 0;
     }).length;
   }
 
@@ -417,15 +451,17 @@ class _TelaRelatoriosState extends State<TelaRelatorios> {
     final fimDoDia = DateTime(dataFim.year, dataFim.month, dataFim.day, 23, 59, 59);
     final saidas = movimentacoes.where((doc) {
       final data = doc.data() as Map<String, dynamic>;
-      final dataMov = DateTime.parse(data['data']);
-      final dentroDoPeriodo = dataMov.isAfter(dataInicio) && dataMov.isBefore(fimDoDia);
-      return data['tipo'] == 'saida' && data['centroDeCusto'] != null && data['centroDeCusto']!.isNotEmpty && dentroDoPeriodo;
+      try {
+        final dataMov = DateTime.parse(data['data']);
+        final dentroDoPeriodo = !dataMov.isBefore(dataInicio) && dataMov.isBefore(fimDoDia);
+        return data['tipo'] == 'saida' && data['centroDeCusto'] != null && data['centroDeCusto']!.isNotEmpty && dentroDoPeriodo;
+      } catch (e) { return false; }
     });
     for (var movDoc in saidas) {
       final movData = movDoc.data() as Map<String, dynamic>;
       final cc = movData['centroDeCusto']!;
       final produtoId = movData['produtoId'];
-      final quantidade = movData['quantidade'] as int;
+      final double quantidade = (movData['quantidade'] ?? 0).toDouble();
       final valorProduto = valoresProdutos[produtoId] ?? 0.0;
       gastosPorCC.update(cc, (v) => v + (quantidade * valorProduto), ifAbsent: () => quantidade * valorProduto);
     }
@@ -438,15 +474,17 @@ class _TelaRelatoriosState extends State<TelaRelatorios> {
     final fim = DateTime(_dataFim!.year, _dataFim!.month, _dataFim!.day, 23, 59, 59);
     final saidas = movimentacoes.where((doc) {
       final data = doc.data() as Map<String, dynamic>;
-      final dataMov = DateTime.parse(data['data']);
-      return data['tipo'] == 'saida' && dataMov.isAfter(_dataInicio!) && dataMov.isBefore(fim);
+      try {
+        final dataMov = DateTime.parse(data['data']);
+        return data['tipo'] == 'saida' && !dataMov.isBefore(_dataInicio!) && dataMov.isBefore(fim);
+      } catch (e) { return false; }
     });
     if (saidas.isEmpty) return {'A': [], 'B': [], 'C': []};
     for (var movDoc in saidas) {
       final movData = movDoc.data() as Map<String, dynamic>;
       final produtoId = movData['produtoId'];
       final produtoNome = movData['produtoNome'] ?? 'Produto desconhecido';
-      final quantidade = movData['quantidade'] as int;
+      final double quantidade = (movData['quantidade'] ?? 0).toDouble();
       final valorUnitario = valoresProdutos[produtoId] ?? 0.0;
       valorPorProduto.update(produtoNome, (v) => v + (quantidade * valorUnitario), ifAbsent: () => (quantidade * valorUnitario));
     }
@@ -466,11 +504,11 @@ class _TelaRelatoriosState extends State<TelaRelatorios> {
     return curvaABC;
   }
 
-  Map<String, Map<String, int>> _calcularConsumoPorCliente(List<QueryDocumentSnapshot> movimentacoes) {
+  Map<String, Map<String, double>> _calcularConsumoPorCliente(List<QueryDocumentSnapshot> movimentacoes, List<QueryDocumentSnapshot> produtos) {
     if (_parceiroSelecionadoParaAnalise == null) return {};
     final dadosParceiro = _parceiroSelecionadoParaAnalise!.data() as Map<String, dynamic>;
     final nomeParceiroSelecionado = dadosParceiro['nome'];
-    final consumoPorOS = <String, Map<String, int>>{};
+    final consumoPorOS = <String, Map<String, double>>{};
     final movsFiltrados = movimentacoes.where((doc) {
       final data = doc.data() as Map<String, dynamic>;
       return (data['subTipo'] == 'OS' || data['subTipo'] == 'Venda') && data['nomeCliente'] == nomeParceiroSelecionado;
@@ -479,7 +517,7 @@ class _TelaRelatoriosState extends State<TelaRelatorios> {
       final movData = movDoc.data() as Map<String, dynamic>;
       final os = movData['numeroOS'] ?? movData['numeroNF'] ?? 'Não Identificado';
       final produto = movData['produtoNome'] ?? 'N/A';
-      final quantidade = movData['quantidade'] as int;
+      final double quantidade = (movData['quantidade'] ?? 0).toDouble();
       consumoPorOS.putIfAbsent(os, () => {});
       consumoPorOS[os]!.update(produto, (v) => v + quantidade, ifAbsent: () => quantidade);
     }
@@ -492,42 +530,20 @@ class _TelaRelatoriosState extends State<TelaRelatorios> {
     final fimDoDia = DateTime(dataFim.year, dataFim.month, dataFim.day, 23, 59, 59);
     final saidasItau = movimentacoes.where((doc) {
       final data = doc.data() as Map<String, dynamic>;
-      final dataMov = DateTime.parse(data['data']);
-      final dentroDoPeriodo = dataMov.isAfter(dataInicio) && dataMov.isBefore(fimDoDia);
-      return data['tipo'] == 'saida' && data['subTipo'] == 'Itau' && dentroDoPeriodo;
+      try {
+        final dataMov = DateTime.parse(data['data']);
+        final dentroDoPeriodo = !dataMov.isBefore(dataInicio) && dataMov.isBefore(fimDoDia);
+        return data['tipo'] == 'saida' && data['subTipo'] == 'Itau' && dentroDoPeriodo;
+      } catch(e) { return false; }
     });
     for (var movDoc in saidasItau) {
       final movData = movDoc.data() as Map<String, dynamic>;
       final produtoId = movData['produtoId'];
-      final quantidade = movData['quantidade'] as int;
+      final double quantidade = (movData['quantidade'] ?? 0).toDouble();
       final valorProduto = valoresProdutos[produtoId] ?? 0.0;
       valorTotalItau += (quantidade * valorProduto);
     }
     return valorTotalItau;
-  }
-
-  Map<String, dynamic> _calcularEstoqueRevenda(List<QueryDocumentSnapshot> produtos, List<ProdutoComEstoqueHistorico>? listaProdutosHistoricos, List<QueryDocumentSnapshot> movimentacoes) {
-    final idsProdutosRevenda = produtos.where((doc) => (doc.data() as Map<String, dynamic>)['grupo'] == 'REVENDA').map((doc) => doc.id).toSet();
-    List<ProdutoComEstoqueHistorico> itensRevenda;
-    if (listaProdutosHistoricos != null) {
-      final produtosMap = {for (var p in produtos) p.id: p};
-      itensRevenda = listaProdutosHistoricos.where((p) {
-        final produtoDoc = produtosMap.values.firstWhere((doc) => (doc.data() as Map<String,dynamic>)['codigo'] == p.codigo, orElse: () => produtos.first);
-        return idsProdutosRevenda.contains(produtoDoc.id);
-      }).toList();
-    } else {
-      itensRevenda = produtos.where((p) => idsProdutosRevenda.contains(p.id) && (p.data() as Map<String, dynamic>)['quantidadeAtual'] > 0).map((p) {
-        final pData = p.data() as Map<String, dynamic>;
-        return ProdutoComEstoqueHistorico(
-          codigo: pData['codigo'] ?? 'N/A',
-          nome: pData['nome'] ?? 'N/A',
-          quantidade: pData['quantidadeAtual'] ?? 0,
-          custoUnitario: (pData['valor'] ?? 0.0).toDouble(),
-        );
-      }).toList();
-    }
-    final double valorTotalRevenda = itensRevenda.fold(0.0, (total, item) => total + item.custoTotal);
-    return {'valorTotalRevenda': valorTotalRevenda, 'itensRevenda': itensRevenda};
   }
 
   Widget _buildTabelaEstoqueDetalhado(List<ProdutoComEstoqueHistorico> produtos) {
@@ -551,7 +567,7 @@ class _TelaRelatoriosState extends State<TelaRelatorios> {
             cells: [
               DataCell(Text(produto.codigo)),
               DataCell(Text(produto.nome)),
-              DataCell(Text(produto.quantidade.toString())),
+              DataCell(Text(produto.quantidade.toStringAsFixed(3).replaceAll('.', ','))),
               DataCell(Text(formatoMoeda.format(produto.custoUnitario))),
               DataCell(Text(formatoMoeda.format(produto.custoTotal))),
             ],
@@ -600,5 +616,18 @@ class _TelaRelatoriosState extends State<TelaRelatorios> {
           ),
       ],
     );
+  }
+  Future<void> _selecionarData(BuildContext context, {required bool isDataInicio}) async {
+    final dataSelecionada = await showDatePicker(context: context, initialDate: DateTime.now(), firstDate: DateTime(2020), lastDate: DateTime.now().add(const Duration(days: 365)));
+    if (dataSelecionada != null) {
+      setState(() { if (isDataInicio) { _dataInicio = dataSelecionada; } else { _dataFim = dataSelecionada; } });
+    }
+  }
+
+  void _limparFiltroDePeriodo() {
+    setState(() {
+      _dataInicio = null;
+      _dataFim = null;
+    });
   }
 }

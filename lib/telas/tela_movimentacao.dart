@@ -1,4 +1,4 @@
-// CÓDIGO 100% COMPLETO E FINAL DA TELA DE MOVIMENTAÇÃO (29/09/2025)
+// CÓDIGO CORRIGIDO E COMPLETO - TELA DE MOVIMENTAÇÃO
 
 import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -8,35 +8,34 @@ import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import '../models/movimentacao.dart';
 
-// Classe de formatação de moeda (reutilizada do cadastro de produto)
+// Classe de formatação de moeda
 class CurrencyInputFormatter extends TextInputFormatter {
   final int maxDigitsBeforeDecimal;
-
   CurrencyInputFormatter({this.maxDigitsBeforeDecimal = 7});
 
   @override
   TextEditingValue formatEditUpdate(TextEditingValue oldValue, TextEditingValue newValue) {
     String newText = newValue.text.replaceAll(RegExp(r'[^0-9]'), '');
     if (newText.isEmpty) return newValue.copyWith(text: '');
-
-    if (newText.length > maxDigitsBeforeDecimal + 2) {
-      return oldValue;
-    }
-
+    if (newText.length > maxDigitsBeforeDecimal + 2) return oldValue;
     double value = double.parse(newText) / 100;
     final formatter = NumberFormat.currency(locale: 'pt_BR', symbol: 'R\$ ');
     String formattedText = formatter.format(value);
-
-    return newValue.copyWith(
-      text: formattedText,
-      selection: TextSelection.collapsed(offset: formattedText.length),
-    );
+    return newValue.copyWith(text: formattedText, selection: TextSelection.collapsed(offset: formattedText.length));
   }
 }
 
 class TelaMovimentacao extends StatefulWidget {
   final QueryDocumentSnapshot? produtoPreSelecionado;
-  const TelaMovimentacao({super.key, this.produtoPreSelecionado});
+
+  // ---> MUDANÇA 1: Adicionamos o novo parâmetro para receber o tipo inicial <---
+  final TipoMovimentacao? tipoMovimentacaoInicial;
+
+  const TelaMovimentacao({
+    super.key,
+    this.produtoPreSelecionado,
+    this.tipoMovimentacaoInicial, // ---> MUDANÇA 2: Adicionamos ao construtor <---
+  });
 
   @override
   State<TelaMovimentacao> createState() => _TelaMovimentacaoState();
@@ -47,14 +46,15 @@ class _TelaMovimentacaoState extends State<TelaMovimentacao> {
 
   QueryDocumentSnapshot? _produtoDocSelecionado;
   QueryDocumentSnapshot? _parceiroDocSelecionado;
-  TipoMovimentacao _tipoMovimentacao = TipoMovimentacao.entrada;
-  String? _subtipoSelecionado;
 
+  // ---> MUDANÇA 3: Removemos a inicialização daqui <---
+  late TipoMovimentacao _tipoMovimentacao;
+
+  String? _subtipoSelecionado;
   List<QueryDocumentSnapshot> _listaDeProdutos = [];
   List<QueryDocumentSnapshot> _listaDeParceiros = [];
   bool _carregandoDados = true;
   bool _isSalvando = false;
-
   final List<String> _subtiposEntrada = const ['COMPRA', 'Devolução', 'Acerto de estoque'];
   final List<String> _subtiposSaida = const ['Venda', 'OS', 'Itau', 'Colaborador'];
 
@@ -73,6 +73,13 @@ class _TelaMovimentacaoState extends State<TelaMovimentacao> {
   @override
   void initState() {
     super.initState();
+
+    // ---> MUDANÇA 4: A MÁGICA ACONTECE AQUI! <---
+    // O "PORQUÊ": Definimos o valor inicial do Radio Button.
+    // Se um tipo foi passado (vindo da tela home), usamos ele.
+    // Senão, o padrão será 'entrada'.
+    _tipoMovimentacao = widget.tipoMovimentacaoInicial ?? TipoMovimentacao.entrada;
+
     if (widget.produtoPreSelecionado != null) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) {
@@ -83,6 +90,7 @@ class _TelaMovimentacaoState extends State<TelaMovimentacao> {
     _carregarDadosIniciais();
   }
 
+  // (O resto do seu arquivo tela_movimentacao.dart continua igual)
   @override
   void dispose() {
     _produtoAutocompleteController.dispose();
@@ -105,10 +113,8 @@ class _TelaMovimentacaoState extends State<TelaMovimentacao> {
       if (produtoDoc != null) {
         final data = produtoDoc.data() as Map<String, dynamic>;
         _produtoAutocompleteController.text = "${data['codigo']} - ${data['nome']}";
-
         double valorInicial = (data['valor'] ?? 0.0).toDouble();
         _valorCompraController.text = NumberFormat.currency(locale: 'pt_BR', symbol: 'R\$ ').format(valorInicial);
-
       } else {
         _produtoAutocompleteController.clear();
         _valorCompraController.clear();
@@ -154,9 +160,6 @@ class _TelaMovimentacaoState extends State<TelaMovimentacao> {
       setState(() { _isSalvando = true; });
       final db = FirebaseFirestore.instance;
       final produtoRef = db.collection('produtos').doc(_produtoDocSelecionado!.id);
-
-      // O "PORQUÊ": A quantidade agora é lida como um double, trocando a vírgula do
-      // usuário por um ponto para que o Dart entenda o número corretamente.
       final double quantidadeMovimentada = double.parse(_qtdController.text.replaceAll(',', '.'));
       final double valorDaCompra = double.tryParse(_valorCompraController.text.replaceAll(RegExp(r'[^0-9,]'), '').replaceAll(',', '.')) ?? 0.0;
 
@@ -165,17 +168,12 @@ class _TelaMovimentacaoState extends State<TelaMovimentacao> {
           final produtoSnapshot = await transaction.get(produtoRef);
           if (!produtoSnapshot.exists) { throw Exception("Produto não encontrado!"); }
           final dadosProduto = produtoSnapshot.data() as Map<String, dynamic>;
-
-          // O "PORQUÊ": Garantimos que o estoque atual seja lido como um double,
-          // não importa se no banco ele está salvo como inteiro ou decimal.
           final estoqueAtual = (dadosProduto['quantidadeAtual'] ?? 0).toDouble();
           double novoEstoque;
           final Map<String, dynamic> updateData = {};
 
           if (_tipoMovimentacao == TipoMovimentacao.saida) {
-            // A comparação de estoque agora é feita com decimais.
             if (estoqueAtual < quantidadeMovimentada) {
-              // A mensagem de erro agora formata o número para exibir corretamente.
               throw Exception('Estoque insuficiente! Saldo atual: ${estoqueAtual.toStringAsFixed(3).replaceAll('.', ',')}');
             }
             novoEstoque = estoqueAtual - quantidadeMovimentada;
@@ -188,7 +186,6 @@ class _TelaMovimentacaoState extends State<TelaMovimentacao> {
               updateData['valor'] = valorDaCompra;
             }
           }
-          // O novo estoque é salvo como um double.
           updateData['quantidadeAtual'] = novoEstoque;
           transaction.update(produtoRef, updateData);
           final dadosParceiro = _parceiroDocSelecionado?.data() as Map<String, dynamic>?;
@@ -198,7 +195,6 @@ class _TelaMovimentacaoState extends State<TelaMovimentacao> {
             produtoCodigo: dadosProduto['codigo'],
             produtoNome: dadosProduto['nome'],
             tipo: _tipoMovimentacao,
-            // A quantidade da movimentação também é salva como double.
             quantidade: quantidadeMovimentada,
             data: DateTime.now(),
             subTipo: _subtipoSelecionado,
@@ -216,10 +212,14 @@ class _TelaMovimentacaoState extends State<TelaMovimentacao> {
           final movimentacaoRef = db.collection('movimentacoes').doc();
           transaction.set(movimentacaoRef, novaMovimentacao.toJson());
         });
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Movimentação salva com sucesso!'), backgroundColor: Colors.green));
-        if (mounted) Navigator.of(context).pop();
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Movimentação salva com sucesso!'), backgroundColor: Colors.green));
+          Navigator.of(context).pop();
+        }
       } catch (e) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Erro: ${e.toString().replaceAll("Exception: ", "")}'), backgroundColor: Colors.red));
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Erro: ${e.toString().replaceAll("Exception: ", "")}'), backgroundColor: Colors.red));
+        }
       } finally {
         if(mounted) { setState(() { _isSalvando = false; }); }
       }
@@ -271,7 +271,6 @@ class _TelaMovimentacaoState extends State<TelaMovimentacao> {
         if (_produtoAutocompleteController.text.isNotEmpty && textEditingController.text.isEmpty) {
           textEditingController.text = _produtoAutocompleteController.text;
         }
-
         return TextFormField(
           controller: textEditingController,
           focusNode: focusNode,
@@ -287,12 +286,8 @@ class _TelaMovimentacaoState extends State<TelaMovimentacao> {
             ),
           ),
           validator: (value) {
-            if (value != null && value.isNotEmpty && _produtoDocSelecionado == null) {
-              return 'Selecione um produto válido da lista.';
-            }
-            if (value == null || value.isEmpty) {
-              return 'O produto é obrigatório.';
-            }
+            if (value != null && value.isNotEmpty && _produtoDocSelecionado == null) return 'Selecione um produto válido da lista.';
+            if (value == null || value.isEmpty) return 'O produto é obrigatório.';
             return null;
           },
         );
@@ -329,21 +324,13 @@ class _TelaMovimentacaoState extends State<TelaMovimentacao> {
   }
 
   Widget _buildCampoQuantidade() {
-    // O "PORQUÊ": Este widget foi completamente atualizado para aceitar decimais.
     return TextFormField(
       controller: _qtdController,
-      decoration: const InputDecoration(
-          labelText: 'Quantidade', border: OutlineInputBorder()),
-      // 1. Teclado para decimais
+      decoration: const InputDecoration(labelText: 'Quantidade', border: OutlineInputBorder()),
       keyboardType: const TextInputType.numberWithOptions(decimal: true),
-      inputFormatters: [
-        // 2. Filtro que permite números e UMA vírgula.
-        FilteringTextInputFormatter.allow(RegExp(r'^\d+\,?\d{0,3}')),
-        LengthLimitingTextInputFormatter(10)
-      ],
+      inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'^\d+\,?\d{0,3}')), LengthLimitingTextInputFormatter(10)],
       validator: (t) {
         if (t == null || t.isEmpty) return 'Quantidade inválida';
-        // 3. Validação que checa se o valor é um decimal maior que zero.
         final valor = double.tryParse(t.replaceAll(',', '.')) ?? 0.0;
         if (valor <= 0) return 'A quantidade deve ser maior que zero';
         return null;

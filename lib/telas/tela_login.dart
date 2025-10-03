@@ -1,10 +1,7 @@
+// CÓDIGO ATUALIZADO COM "MOSTRAR/ESCONDER SENHA"
+
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-
-// O "PORQUÊ": Removemos o import da TelaHome daqui.
-// A navegação para a tela principal deve ser controlada pelo StreamBuilder
-// no seu main.dart, que ouve o estado de autenticação. A tela de login
-// não deve mais ser responsável por essa navegação direta.
 
 class TelaLogin extends StatefulWidget {
   const TelaLogin({super.key});
@@ -18,6 +15,9 @@ class _TelaLoginState extends State<TelaLogin> {
   bool _isLoginMode = true;
   bool _isLoading = false;
 
+  // ---> NOVA VARIÁVEL: Para controlar a visibilidade da senha <---
+  bool _isPasswordVisible = false;
+
   final _emailController = TextEditingController();
   final _senhaController = TextEditingController();
   final _confirmarSenhaController = TextEditingController();
@@ -30,11 +30,77 @@ class _TelaLoginState extends State<TelaLogin> {
     super.dispose();
   }
 
+  Future<void> _mostrarDialogoEsqueciSenha(BuildContext context) async {
+    final emailController = TextEditingController();
+
+    return showDialog<void>(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: const Text('Redefinir Senha'),
+          content: TextField(
+            controller: emailController,
+            keyboardType: TextInputType.emailAddress,
+            decoration: const InputDecoration(
+              labelText: 'Digite seu e-mail de cadastro',
+              hintText: 'seu.email@exemplo.com',
+            ),
+          ),
+          actions: <Widget>[
+            TextButton(
+              child: const Text('Cancelar'),
+              onPressed: () {
+                Navigator.of(context).pop();
+              },
+            ),
+            ElevatedButton(
+              child: const Text('Enviar Link'),
+              onPressed: () async {
+                final email = emailController.text.trim();
+                if (email.isNotEmpty && email.contains('@')) {
+                  try {
+                    await FirebaseAuth.instance.sendPasswordResetEmail(email: email);
+                    if (!mounted) return;
+                    Navigator.of(context).pop();
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('E-mail de redefinição enviado! Verifique sua caixa de entrada.'),
+                        backgroundColor: Colors.green,
+                      ),
+                    );
+                  } on FirebaseAuthException catch (e) {
+                    if (!mounted) return;
+                    Navigator.of(context).pop();
+                    String mensagemErro = 'Ocorreu um erro. Tente novamente.';
+                    if (e.code == 'user-not-found') {
+                      mensagemErro = 'Nenhum usuário encontrado com este e-mail.';
+                    }
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text(mensagemErro),
+                        backgroundColor: Colors.red,
+                      ),
+                    );
+                  }
+                } else {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('Por favor, digite um e-mail válido.'),
+                      backgroundColor: Colors.orange,
+                    ),
+                  );
+                }
+              },
+            ),
+          ],
+        );
+      },
+    );
+  }
+
   Future<void> _submitAuthForm() async {
     final isValid = _formKey.currentState?.validate() ?? false;
-    if (!isValid) {
-      return;
-    }
+    if (!isValid) return;
 
     setState(() { _isLoading = true; });
 
@@ -43,38 +109,14 @@ class _TelaLoginState extends State<TelaLogin> {
       final senha = _senhaController.text.trim();
 
       if (_isLoginMode) {
-        // LÓGICA DE LOGIN (Entrar)
-        await FirebaseAuth.instance.signInWithEmailAndPassword(
-          email: email,
-          password: senha,
-        );
-        // Se o login for bem-sucedido, o StreamBuilder no main.dart
-        // irá detectar o usuário logado e redirecionar para a TelaHome.
-        // Não precisamos mais de um Navigator.push aqui.
-
+        await FirebaseAuth.instance.signInWithEmailAndPassword(email: email, password: senha);
       } else {
-        // LÓGICA DE CADASTRO
-        // O "PORQUÊ": Aqui está a principal mudança de fluxo.
-        // 1. Criamos o usuário no Firebase Auth.
-        await FirebaseAuth.instance.createUserWithEmailAndPassword(
-          email: email,
-          password: senha,
-        );
-
-        // 2. Deslogamos o usuário imediatamente. Nossa Cloud Function no backend
-        // já foi acionada e já desabilitou a conta.
+        await FirebaseAuth.instance.createUserWithEmailAndPassword(email: email, password: senha);
         await FirebaseAuth.instance.signOut();
-
-        // 3. Exibimos uma mensagem de sucesso e orientação para o usuário.
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Cadastro realizado! Sua conta aguarda aprovação.'),
-              backgroundColor: Colors.green,
-            ),
+            const SnackBar(content: Text('Cadastro realizado! Sua conta aguarda aprovação.'), backgroundColor: Colors.green),
           );
-
-          // 4. Voltamos para o modo de login e limpamos os campos de senha.
           setState(() {
             _isLoginMode = true;
             _senhaController.clear();
@@ -82,11 +124,8 @@ class _TelaLoginState extends State<TelaLogin> {
           });
         }
       }
-
     } on FirebaseAuthException catch (e) {
       String mensagemErro = 'Ocorreu um erro. Verifique suas credenciais.';
-
-      // NOVA LÓGICA: Capturamos o erro específico de usuário desabilitado.
       if (e.code == 'user-disabled') {
         mensagemErro = 'Sua conta está aguardando aprovação de um administrador.';
       } else if (e.code == 'weak-password') {
@@ -96,14 +135,17 @@ class _TelaLoginState extends State<TelaLogin> {
       } else if (e.code == 'user-not-found' || e.code == 'wrong-password' || e.code == 'invalid-credential') {
         mensagemErro = 'E-mail ou senha incorretos.';
       }
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(mensagemErro), backgroundColor: Colors.red),
-      );
+      if(mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(mensagemErro), backgroundColor: Colors.red),
+        );
+      }
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Ocorreu um erro inesperado: $e'), backgroundColor: Colors.red),
-      );
+      if(mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Ocorreu um erro inesperado: $e'), backgroundColor: Colors.red),
+        );
+      }
     } finally {
       if (mounted) {
         setState(() { _isLoading = false; });
@@ -113,7 +155,6 @@ class _TelaLoginState extends State<TelaLogin> {
 
   @override
   Widget build(BuildContext context) {
-    // O Widget build continua exatamente o mesmo, sem nenhuma alteração.
     return Scaffold(
       backgroundColor: Theme.of(context).colorScheme.primary,
       body: Center(
@@ -150,8 +191,26 @@ class _TelaLoginState extends State<TelaLogin> {
 
                     TextFormField(
                       controller: _senhaController,
-                      obscureText: true,
-                      decoration: const InputDecoration(labelText: 'Senha', border: OutlineInputBorder()),
+                      // ---> MUDANÇA 1: Trocamos 'true' pela nossa variável com '!' na frente <---
+                      // O "PORQUÊ": Quando a variável for true (visível), o obscureText será false.
+                      obscureText: !_isPasswordVisible,
+                      decoration: InputDecoration(
+                        labelText: 'Senha',
+                        border: const OutlineInputBorder(),
+                        // ---> MUDANÇA 2: Adicionamos o ícone de "olho" <---
+                        suffixIcon: IconButton(
+                          // O "PORQUÊ": O ícone muda dependendo se a senha está visível ou não.
+                          icon: Icon(
+                            _isPasswordVisible ? Icons.visibility_off : Icons.visibility,
+                          ),
+                          onPressed: () {
+                            // O "PORQUÊ": setState avisa a tela para se redesenhar com o novo valor.
+                            setState(() {
+                              _isPasswordVisible = !_isPasswordVisible;
+                            });
+                          },
+                        ),
+                      ),
                       validator: (value) {
                         if (value == null || value.length < 6) {
                           return 'A senha deve ter no mínimo 6 caracteres.';
@@ -159,13 +218,37 @@ class _TelaLoginState extends State<TelaLogin> {
                         return null;
                       },
                     ),
-                    const SizedBox(height: 16),
 
-                    if (!_isLoginMode)
+                    if (_isLoginMode)
+                      Align(
+                        alignment: Alignment.centerRight,
+                        child: TextButton(
+                          onPressed: () => _mostrarDialogoEsqueciSenha(context),
+                          child: const Text('Esqueci minha senha'),
+                        ),
+                      ),
+
+                    if (!_isLoginMode) ...[
+                      const SizedBox(height: 16),
                       TextFormField(
                         controller: _confirmarSenhaController,
-                        obscureText: true,
-                        decoration: const InputDecoration(labelText: 'Confirmar Senha', border: OutlineInputBorder()),
+                        // ---> MUDANÇA 3: Aplicamos a mesma lógica aqui <---
+                        obscureText: !_isPasswordVisible,
+                        decoration: InputDecoration(
+                          labelText: 'Confirmar Senha',
+                          border: const OutlineInputBorder(),
+                          // ---> MUDANÇA 4: E adicionamos o mesmo ícone <---
+                          suffixIcon: IconButton(
+                            icon: Icon(
+                              _isPasswordVisible ? Icons.visibility_off : Icons.visibility,
+                            ),
+                            onPressed: () {
+                              setState(() {
+                                _isPasswordVisible = !_isPasswordVisible;
+                              });
+                            },
+                          ),
+                        ),
                         validator: (value) {
                           if (value != _senhaController.text) {
                             return 'As senhas não coincidem.';
@@ -173,6 +256,8 @@ class _TelaLoginState extends State<TelaLogin> {
                           return null;
                         },
                       ),
+                    ],
+
                     const SizedBox(height: 24),
 
                     if (_isLoading)
