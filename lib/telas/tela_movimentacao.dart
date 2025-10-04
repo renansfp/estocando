@@ -1,40 +1,48 @@
-// CÓDIGO CORRIGIDO E COMPLETO - TELA DE MOVIMENTAÇÃO
+// CÓDIGO REALMENTE COMPLETO E CORRIGIDO - TELA DE MOVIMENTAÇÃO
 
 import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:estocando/telas/tela_cadastro_parceiro.dart';
+import 'package:firebase_auth/firebase_auth.dart'; // ---> MUDANÇA 1: Importamos para pegar o usuário logado.
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import '../models/movimentacao.dart';
 
-// Classe de formatação de moeda
+// Classe de formatação de moeda (reutilizada do cadastro de produto)
 class CurrencyInputFormatter extends TextInputFormatter {
   final int maxDigitsBeforeDecimal;
+
   CurrencyInputFormatter({this.maxDigitsBeforeDecimal = 7});
 
   @override
   TextEditingValue formatEditUpdate(TextEditingValue oldValue, TextEditingValue newValue) {
     String newText = newValue.text.replaceAll(RegExp(r'[^0-9]'), '');
     if (newText.isEmpty) return newValue.copyWith(text: '');
-    if (newText.length > maxDigitsBeforeDecimal + 2) return oldValue;
+
+    if (newText.length > maxDigitsBeforeDecimal + 2) {
+      return oldValue;
+    }
+
     double value = double.parse(newText) / 100;
     final formatter = NumberFormat.currency(locale: 'pt_BR', symbol: 'R\$ ');
     String formattedText = formatter.format(value);
-    return newValue.copyWith(text: formattedText, selection: TextSelection.collapsed(offset: formattedText.length));
+
+    return newValue.copyWith(
+      text: formattedText,
+      selection: TextSelection.collapsed(offset: formattedText.length),
+    );
   }
 }
 
 class TelaMovimentacao extends StatefulWidget {
   final QueryDocumentSnapshot? produtoPreSelecionado;
-
-  // ---> MUDANÇA 1: Adicionamos o novo parâmetro para receber o tipo inicial <---
   final TipoMovimentacao? tipoMovimentacaoInicial;
 
   const TelaMovimentacao({
     super.key,
     this.produtoPreSelecionado,
-    this.tipoMovimentacaoInicial, // ---> MUDANÇA 2: Adicionamos ao construtor <---
+    this.tipoMovimentacaoInicial,
   });
 
   @override
@@ -46,15 +54,17 @@ class _TelaMovimentacaoState extends State<TelaMovimentacao> {
 
   QueryDocumentSnapshot? _produtoDocSelecionado;
   QueryDocumentSnapshot? _parceiroDocSelecionado;
-
-  // ---> MUDANÇA 3: Removemos a inicialização daqui <---
   late TipoMovimentacao _tipoMovimentacao;
-
   String? _subtipoSelecionado;
+
+  // ---> MUDANÇA 2: Criamos uma variável para guardar o ID da empresa.
+  String? _empresaId;
+
   List<QueryDocumentSnapshot> _listaDeProdutos = [];
   List<QueryDocumentSnapshot> _listaDeParceiros = [];
   bool _carregandoDados = true;
   bool _isSalvando = false;
+
   final List<String> _subtiposEntrada = const ['COMPRA', 'Devolução', 'Acerto de estoque'];
   final List<String> _subtiposSaida = const ['Venda', 'OS', 'Itau', 'Colaborador'];
 
@@ -73,11 +83,6 @@ class _TelaMovimentacaoState extends State<TelaMovimentacao> {
   @override
   void initState() {
     super.initState();
-
-    // ---> MUDANÇA 4: A MÁGICA ACONTECE AQUI! <---
-    // O "PORQUÊ": Definimos o valor inicial do Radio Button.
-    // Se um tipo foi passado (vindo da tela home), usamos ele.
-    // Senão, o padrão será 'entrada'.
     _tipoMovimentacao = widget.tipoMovimentacaoInicial ?? TipoMovimentacao.entrada;
 
     if (widget.produtoPreSelecionado != null) {
@@ -90,7 +95,6 @@ class _TelaMovimentacaoState extends State<TelaMovimentacao> {
     _carregarDadosIniciais();
   }
 
-  // (O resto do seu arquivo tela_movimentacao.dart continua igual)
   @override
   void dispose() {
     _produtoAutocompleteController.dispose();
@@ -113,8 +117,10 @@ class _TelaMovimentacaoState extends State<TelaMovimentacao> {
       if (produtoDoc != null) {
         final data = produtoDoc.data() as Map<String, dynamic>;
         _produtoAutocompleteController.text = "${data['codigo']} - ${data['nome']}";
+
         double valorInicial = (data['valor'] ?? 0.0).toDouble();
         _valorCompraController.text = NumberFormat.currency(locale: 'pt_BR', symbol: 'R\$ ').format(valorInicial);
+
       } else {
         _produtoAutocompleteController.clear();
         _valorCompraController.clear();
@@ -122,11 +128,35 @@ class _TelaMovimentacaoState extends State<TelaMovimentacao> {
     });
   }
 
+  // ---> MUDANÇA 3: A função de carregar dados agora filtra pela empresa.
   Future<void> _carregarDadosIniciais() async {
     try {
+      final user = FirebaseAuth.instance.currentUser;
+      if (user == null) {
+        throw Exception('Usuário não autenticado.');
+      }
+
+      // Primeiro, buscamos o empresaId do usuário logado na coleção 'usuarios'.
+      final userDoc = await FirebaseFirestore.instance.collection('usuarios').doc(user.uid).get();
+      if (!userDoc.exists || (userDoc.data() as Map<String, dynamic>)['empresaId'] == null) {
+        throw Exception('ID da empresa não encontrado para este usuário.');
+      }
+      final empresaId = (userDoc.data() as Map<String, dynamic>)['empresaId'];
+
+      // Guardamos o ID da empresa para usar mais tarde
+      _empresaId = empresaId;
+
       final db = FirebaseFirestore.instance;
-      final produtosFuture = db.collection('produtos').where('ativo', isEqualTo: true).orderBy('nome').get();
-      final parceirosFuture = db.collection('parceiros').orderBy('nome').get();
+      // Agora, as buscas por produtos e parceiros são filtradas com .where()
+      final produtosFuture = db.collection('produtos')
+          .where('empresaId', isEqualTo: _empresaId)
+          .where('ativo', isEqualTo: true)
+          .orderBy('nome').get();
+
+      final parceirosFuture = db.collection('parceiros')
+          .where('empresaId', isEqualTo: _empresaId)
+          .orderBy('nome').get();
+
       final results = await Future.wait([produtosFuture, parceirosFuture]);
       if (mounted) {
         setState(() {
@@ -160,6 +190,7 @@ class _TelaMovimentacaoState extends State<TelaMovimentacao> {
       setState(() { _isSalvando = true; });
       final db = FirebaseFirestore.instance;
       final produtoRef = db.collection('produtos').doc(_produtoDocSelecionado!.id);
+
       final double quantidadeMovimentada = double.parse(_qtdController.text.replaceAll(',', '.'));
       final double valorDaCompra = double.tryParse(_valorCompraController.text.replaceAll(RegExp(r'[^0-9,]'), '').replaceAll(',', '.')) ?? 0.0;
 
@@ -168,6 +199,11 @@ class _TelaMovimentacaoState extends State<TelaMovimentacao> {
           final produtoSnapshot = await transaction.get(produtoRef);
           if (!produtoSnapshot.exists) { throw Exception("Produto não encontrado!"); }
           final dadosProduto = produtoSnapshot.data() as Map<String, dynamic>;
+
+          if (dadosProduto['empresaId'] != _empresaId) {
+            throw Exception('Este produto não pertence à sua empresa.');
+          }
+
           final estoqueAtual = (dadosProduto['quantidadeAtual'] ?? 0).toDouble();
           double novoEstoque;
           final Map<String, dynamic> updateData = {};
@@ -190,7 +226,10 @@ class _TelaMovimentacaoState extends State<TelaMovimentacao> {
           transaction.update(produtoRef, updateData);
           final dadosParceiro = _parceiroDocSelecionado?.data() as Map<String, dynamic>?;
           final tipoParceiro = dadosParceiro != null ? TipoParceiro.values.byName(dadosParceiro['tipo']) : null;
+
+          // ---> MUDANÇA 4: A CORREÇÃO DO ERRO! Adicionamos o empresaId aqui.
           final novaMovimentacao = Movimentacao(
+            empresaId: _empresaId!,
             produtoId: _produtoDocSelecionado!.id,
             produtoCodigo: dadosProduto['codigo'],
             produtoNome: dadosProduto['nome'],
@@ -230,7 +269,9 @@ class _TelaMovimentacaoState extends State<TelaMovimentacao> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('Registrar Movimentação')),
-      body: SingleChildScrollView(
+      body: _carregandoDados
+          ? const Center(child: CircularProgressIndicator())
+          : SingleChildScrollView(
         child: Padding(
           padding: const EdgeInsets.all(16.0),
           child: Form(
@@ -249,7 +290,7 @@ class _TelaMovimentacaoState extends State<TelaMovimentacao> {
                 _buildCampoQuantidade(),
                 const SizedBox(height: 30),
                 ElevatedButton(
-                  onPressed: _salvarMovimentacao,
+                  onPressed: _isSalvando ? null : _salvarMovimentacao,
                   style: ElevatedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 20), textStyle: const TextStyle(fontSize: 18)),
                   child: _isSalvando ? const CircularProgressIndicator(color: Colors.white) : const Text('Salvar Movimentação'),
                 ),
@@ -271,6 +312,7 @@ class _TelaMovimentacaoState extends State<TelaMovimentacao> {
         if (_produtoAutocompleteController.text.isNotEmpty && textEditingController.text.isEmpty) {
           textEditingController.text = _produtoAutocompleteController.text;
         }
+
         return TextFormField(
           controller: textEditingController,
           focusNode: focusNode,
@@ -286,8 +328,12 @@ class _TelaMovimentacaoState extends State<TelaMovimentacao> {
             ),
           ),
           validator: (value) {
-            if (value != null && value.isNotEmpty && _produtoDocSelecionado == null) return 'Selecione um produto válido da lista.';
-            if (value == null || value.isEmpty) return 'O produto é obrigatório.';
+            if (value != null && value.isNotEmpty && _produtoDocSelecionado == null) {
+              return 'Selecione um produto válido da lista.';
+            }
+            if (value == null || value.isEmpty) {
+              return 'O produto é obrigatório.';
+            }
             return null;
           },
         );
@@ -326,9 +372,13 @@ class _TelaMovimentacaoState extends State<TelaMovimentacao> {
   Widget _buildCampoQuantidade() {
     return TextFormField(
       controller: _qtdController,
-      decoration: const InputDecoration(labelText: 'Quantidade', border: OutlineInputBorder()),
+      decoration: const InputDecoration(
+          labelText: 'Quantidade', border: OutlineInputBorder()),
       keyboardType: const TextInputType.numberWithOptions(decimal: true),
-      inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'^\d+\,?\d{0,3}')), LengthLimitingTextInputFormatter(10)],
+      inputFormatters: [
+        FilteringTextInputFormatter.allow(RegExp(r'^\d+\,?\d{0,3}')),
+        LengthLimitingTextInputFormatter(10)
+      ],
       validator: (t) {
         if (t == null || t.isEmpty) return 'Quantidade inválida';
         final valor = double.tryParse(t.replaceAll(',', '.')) ?? 0.0;
@@ -344,23 +394,36 @@ class _TelaMovimentacaoState extends State<TelaMovimentacao> {
     return Autocomplete<QueryDocumentSnapshot>(
       displayStringForOption: (option) => (option.data() as Map<String, dynamic>)['nome'] ?? '',
       fieldViewBuilder: (context, textEditingController, focusNode, onFieldSubmitted) {
+        // Corrigido para usar o controller do parceiro
+        _parceiroAutocompleteController.text = textEditingController.text;
         return TextFormField(
           controller: textEditingController,
           focusNode: focusNode,
           decoration: InputDecoration(
             labelText: _carregandoDados ? 'Carregando...' : label,
             border: const OutlineInputBorder(),
-            suffixIcon: IconButton(
-              icon: const Icon(Icons.clear),
-              onPressed: () {
-                textEditingController.clear();
-                setState(() { _parceiroDocSelecionado = null; });
-              },
+            suffixIcon: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                IconButton(
+                  icon: const Icon(Icons.add_circle_outline),
+                  onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const TelaCadastroParceiro())),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.clear),
+                  onPressed: () {
+                    textEditingController.clear();
+                    setState(() { _parceiroDocSelecionado = null; });
+                  },
+                ),
+              ],
             ),
           ),
           validator: (value) {
-            if (value != null && value.isNotEmpty && _parceiroDocSelecionado == null) return 'Selecione um $label válido da lista.';
-            if (value == null || value.isEmpty) return 'O $label é obrigatório.';
+            if (_subtipoSelecionado == 'COMPRA' || _subtipoSelecionado == 'Venda' || _subtipoSelecionado == 'OS') {
+              if (value != null && value.isNotEmpty && _parceiroDocSelecionado == null) return 'Selecione um $label válido da lista.';
+              if (value == null || value.isEmpty) return 'O $label é obrigatório.';
+            }
             return null;
           },
         );

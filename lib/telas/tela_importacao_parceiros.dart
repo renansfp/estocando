@@ -1,4 +1,4 @@
-// TELA DE IMPORTAÇÃO DE PARCEIROS
+// CÓDIGO COMPLETO E SEGURO COM LÓGICA DE MULTI-EMPRESA
 
 import 'dart:convert';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -17,20 +17,62 @@ enum StatusImportacao { inicial, carregando, sucesso, erro }
 
 class _TelaImportacaoParceirosState extends State<TelaImportacaoParceiros> {
   StatusImportacao _status = StatusImportacao.inicial;
-  String _mensagemStatus = 'Aguardando seleção dos arquivos.';
+  String _mensagemStatus = 'Selecione uma empresa para começar.';
 
   FilePickerResult? _parceirosFile;
   FilePickerResult? _pagamentosFile;
   FilePickerResult? _recebimentosFile;
 
-  // Função genérica para selecionar arquivos
-  Future<FilePickerResult?> _selecionarArquivo() async {
+  // ---> MUDANÇA 1: Novas variáveis para gerenciar a seleção de empresas.
+  List<Map<String, String>> _listaEmpresas = [];
+  Map<String, String>? _empresaSelecionada;
+  bool _carregandoEmpresas = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _carregarEmpresas(); // ---> MUDANÇA 2: Chamamos a função para buscar as empresas.
+  }
+
+  // ---> MUDANÇA 3: Nova função para buscar todas as empresas cadastradas.
+  Future<void> _carregarEmpresas() async {
     try {
-      final resultado = await FilePicker.platform.pickFiles(
-        type: FileType.custom,
-        allowedExtensions: ['csv'],
-        withData: true,
-      );
+      final usuariosSnapshot = await FirebaseFirestore.instance.collection('usuarios').get();
+      if (!mounted) return;
+
+      final Map<String, String> empresasMap = {};
+      for (var userDoc in usuariosSnapshot.docs) {
+        final data = userDoc.data();
+        final empresaId = data['empresaId'] as String?;
+        final nomeEmpresa = data['nome'] as String?;
+        if (empresaId != null && nomeEmpresa != null) {
+          empresasMap.putIfAbsent(empresaId, () => nomeEmpresa);
+        }
+      }
+
+      final listaFormatada = empresasMap.entries.map((entry) {
+        return {'id': entry.key, 'nome': entry.value};
+      }).toList();
+
+      setState(() {
+        _listaEmpresas = listaFormatada;
+        _carregandoEmpresas = false;
+      });
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _mensagemStatus = "Erro ao carregar empresas: $e";
+          _status = StatusImportacao.erro;
+          _carregandoEmpresas = false;
+        });
+      }
+    }
+  }
+
+  Future<FilePickerResult?> _selecionarArquivo() async {
+    // A checagem de empresa selecionada já é feita no botão
+    try {
+      final resultado = await FilePicker.platform.pickFiles(type: FileType.custom, allowedExtensions: ['csv'], withData: true);
       return resultado;
     } catch (e) {
       setState(() {
@@ -42,28 +84,26 @@ class _TelaImportacaoParceirosState extends State<TelaImportacaoParceiros> {
   }
 
   Future<void> _iniciarImportacao() async {
-    if (_parceirosFile == null || _pagamentosFile == null || _recebimentosFile == null) {
-      setState(() {
-        _status = StatusImportacao.erro;
-        _mensagemStatus = 'Por favor, selecione os três arquivos CSV.';
-      });
+    // ---> MUDANÇA 4: Verificação de segurança para garantir que uma empresa foi selecionada.
+    if (_empresaSelecionada == null || _empresaSelecionada!['id'] == null) {
+      setState(() { _status = StatusImportacao.erro; _mensagemStatus = 'Por favor, selecione uma empresa válida.'; });
       return;
     }
 
-    setState(() {
-      _status = StatusImportacao.carregando;
-      _mensagemStatus = 'Iniciando importação...';
-    });
+    if (_parceirosFile == null || _pagamentosFile == null || _recebimentosFile == null) {
+      setState(() { _status = StatusImportacao.erro; _mensagemStatus = 'Por favor, selecione os três arquivos CSV.'; });
+      return;
+    }
+
+    setState(() { _status = StatusImportacao.carregando; _mensagemStatus = 'Iniciando importação...'; });
 
     try {
       final db = FirebaseFirestore.instance;
+      final String empresaIdSelecionada = _empresaSelecionada!['id']!;
 
-      // ETAPA 1: Ler os arquivos de transações para criar o mapa de classificação.
       setState(() { _mensagemStatus = 'Lendo arquivos de transações...'; });
+      final Map<String, Map<String, int>> contagemTransacoes = {};
 
-      final Map<String, Map<String, int>> contagemTransacoes = {}; // { 'codigo_parceiro': {'pagamentos': X, 'recebimentos': Y} }
-
-      // Processa pagamentos
       final bytesPag = _pagamentosFile!.files.first.bytes!;
       final conteudoPag = utf8.decode(bytesPag);
       final delimitadorPag = (conteudoPag.split('\n').first.contains(';') ? ';' : ',');
@@ -76,7 +116,6 @@ class _TelaImportacaoParceirosState extends State<TelaImportacaoParceiros> {
         contagemTransacoes[codigo]!['pagamentos'] = (contagemTransacoes[codigo]!['pagamentos'] ?? 0) + 1;
       }
 
-      // Processa recebimentos
       final bytesRec = _recebimentosFile!.files.first.bytes!;
       final conteudoRec = utf8.decode(bytesRec);
       final delimitadorRec = (conteudoRec.split('\n').first.contains(';') ? ';' : ',');
@@ -89,22 +128,18 @@ class _TelaImportacaoParceirosState extends State<TelaImportacaoParceiros> {
         contagemTransacoes[codigo]!['recebimentos'] = (contagemTransacoes[codigo]!['recebimentos'] ?? 0) + 1;
       }
 
-      // ETAPA 2: Ler arquivo principal de parceiros.
       setState(() { _mensagemStatus = 'Lendo arquivo de parceiros...'; });
       final bytesParc = _parceirosFile!.files.first.bytes!;
       final conteudoParc = utf8.decode(bytesParc);
       final delimitadorParc = (conteudoParc.split('\n').first.contains(';') ? ';' : ',');
       final linhasParc = CsvToListConverter(fieldDelimiter: delimitadorParc).convert(conteudoParc);
 
-      if (linhasParc.length <= 1) {
-        throw Exception("Arquivo de parceiros está vazio ou contém apenas o cabeçalho.");
-      }
+      if (linhasParc.length <= 1) throw Exception("Arquivo de parceiros está vazio ou contém apenas o cabeçalho.");
 
-      // ETAPA 3: FASE DE VALIDAÇÃO ("TUDO OU NADA")
       setState(() { _mensagemStatus = 'Validando dados...'; });
 
-      // Busca dados existentes no DB de uma só vez
-      final parceirosSnapshot = await db.collection('parceiros').get();
+      // ---> MUDANÇA 5: A busca por parceiros existentes agora é filtrada por empresa.
+      final parceirosSnapshot = await db.collection('parceiros').where('empresaId', isEqualTo: empresaIdSelecionada).get();
       final codigosExistentes = parceirosSnapshot.docs.map((doc) => doc['codigo'] as String).toSet();
       final cnpjsExistentes = parceirosSnapshot.docs.map((doc) => doc['cnpj'] as String?).where((cnpj) => cnpj != null && cnpj.isNotEmpty).toSet();
 
@@ -120,32 +155,24 @@ class _TelaImportacaoParceirosState extends State<TelaImportacaoParceiros> {
         final nome = linha[1].toString().trim();
         final cnpj = linha[3].toString().trim().replaceAll(RegExp(r'[^0-9]'), '');
 
-        // Regra: Ignorar se não teve transação
-        if (!contagemTransacoes.containsKey(codigo)) {
-          continue;
-        }
-
-        // Validação: Duplicidade de código no arquivo
+        if (!contagemTransacoes.containsKey(codigo)) continue;
         if (codigosNoArquivo.contains(codigo)) throw Exception("Código duplicado DENTRO do arquivo CSV: $codigo");
         codigosNoArquivo.add(codigo);
-
-        // Validação: Duplicidade de CNPJ no arquivo
         if (cnpj.isNotEmpty) {
           if (cnpjsNoArquivo.contains(cnpj)) throw Exception("CNPJ/CPF duplicado DENTRO do arquivo CSV: $cnpj");
           cnpjsNoArquivo.add(cnpj);
         }
-
-        // Validação: Duplicidade com o banco de dados
         if (codigosExistentes.contains(codigo)) throw Exception("Código já existente no banco de dados: $codigo");
         if (cnpj.isNotEmpty && cnpjsExistentes.contains(cnpj)) throw Exception("CNPJ/CPF já existente no banco de dados: $cnpj");
 
-        // Se passou em todas as validações, classifica e adiciona à lista para importação
         final contagens = contagemTransacoes[codigo]!;
         final pagamentos = contagens['pagamentos']!;
         final recebimentos = contagens['recebimentos']!;
         final String tipoParceiro = (recebimentos >= pagamentos) ? 'cliente' : 'fornecedor';
 
         parceirosParaAdicionar.add({
+          // ---> MUDANÇA 6: "Carimbamos" o novo parceiro com o ID da empresa.
+          'empresaId': empresaIdSelecionada,
           'codigo': codigo,
           'nome': nome,
           'natureza': linha[2].toString().trim(),
@@ -155,10 +182,7 @@ class _TelaImportacaoParceirosState extends State<TelaImportacaoParceiros> {
         });
       }
 
-      // ETAPA 4: SALVAR EM LOTE (BATCH WRITE)
-      if (parceirosParaAdicionar.isEmpty) {
-        throw Exception("Nenhum parceiro novo e relevante encontrado para importar.");
-      }
+      if (parceirosParaAdicionar.isEmpty) throw Exception("Nenhum parceiro novo e relevante encontrado para importar.");
 
       setState(() { _mensagemStatus = 'Salvando ${parceirosParaAdicionar.length} parceiros...'; });
       final batch = db.batch();
@@ -168,10 +192,9 @@ class _TelaImportacaoParceirosState extends State<TelaImportacaoParceiros> {
       }
       await batch.commit();
 
-      // ETAPA 5: SUCESSO
       setState(() {
         _status = StatusImportacao.sucesso;
-        _mensagemStatus = 'Importação Concluída!\n\n${parceirosParaAdicionar.length} parceiros novos cadastrados.';
+        _mensagemStatus = 'Importação Concluída!\n\n${parceirosParaAdicionar.length} parceiros cadastrados para a empresa: ${_empresaSelecionada!['nome']}.';
       });
 
     } catch (e) {
@@ -196,28 +219,68 @@ class _TelaImportacaoParceirosState extends State<TelaImportacaoParceiros> {
             mainAxisAlignment: MainAxisAlignment.center,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
+              // ---> MUDANÇA 7: Novo Dropdown para selecionar a empresa.
+              if (_carregandoEmpresas)
+                const Center(child: CircularProgressIndicator())
+              else
+                DropdownButtonFormField<Map<String, String>>(
+                  value: _empresaSelecionada,
+                  hint: const Text('1. Selecione a Empresa de Destino'),
+                  isExpanded: true,
+                  items: _listaEmpresas.map((empresa) {
+                    return DropdownMenuItem<Map<String, String>>(
+                      value: empresa,
+                      child: Text(empresa['nome'] ?? 'Empresa Desconhecida'),
+                    );
+                  }).toList(),
+                  onChanged: (valor) {
+                    setState(() {
+                      _empresaSelecionada = valor;
+                      _mensagemStatus = 'Empresa selecionada. Agora selecione os arquivos.';
+                      _parceirosFile = null;
+                      _pagamentosFile = null;
+                      _recebimentosFile = null;
+                    });
+                  },
+                  decoration: const InputDecoration(border: OutlineInputBorder()),
+                ),
+
+              const SizedBox(height: 24),
+
               _buildFilePickerButton(
-                label: '1. Selecionar Parceiros (.csv)',
+                label: '2. Selecionar Parceiros (.csv)',
                 fileResult: _parceirosFile,
                 onPressed: () async {
+                  if (_empresaSelecionada == null) {
+                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Selecione uma empresa primeiro.'), backgroundColor: Colors.orange));
+                    return;
+                  }
                   final file = await _selecionarArquivo();
                   if (file != null) setState(() => _parceirosFile = file);
                 },
               ),
               const SizedBox(height: 16),
               _buildFilePickerButton(
-                label: '2. Selecionar Pagamentos (.csv)',
+                label: '3. Selecionar Pagamentos (.csv)',
                 fileResult: _pagamentosFile,
                 onPressed: () async {
+                  if (_empresaSelecionada == null) {
+                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Selecione uma empresa primeiro.'), backgroundColor: Colors.orange));
+                    return;
+                  }
                   final file = await _selecionarArquivo();
                   if (file != null) setState(() => _pagamentosFile = file);
                 },
               ),
               const SizedBox(height: 16),
               _buildFilePickerButton(
-                label: '3. Selecionar Recebimentos (.csv)',
+                label: '4. Selecionar Recebimentos (.csv)',
                 fileResult: _recebimentosFile,
                 onPressed: () async {
+                  if (_empresaSelecionada == null) {
+                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Selecione uma empresa primeiro.'), backgroundColor: Colors.orange));
+                    return;
+                  }
                   final file = await _selecionarArquivo();
                   if (file != null) setState(() => _recebimentosFile = file);
                 },
@@ -262,8 +325,9 @@ class _TelaImportacaoParceirosState extends State<TelaImportacaoParceiros> {
           style: ElevatedButton.styleFrom(
             padding: const EdgeInsets.symmetric(vertical: 12),
             textStyle: const TextStyle(fontSize: 16),
+            disabledBackgroundColor: Colors.grey.shade300,
           ),
-          onPressed: onPressed,
+          onPressed: _empresaSelecionada != null ? onPressed : null,
         ),
         if (isSelected)
           Padding(
@@ -279,7 +343,6 @@ class _TelaImportacaoParceirosState extends State<TelaImportacaoParceiros> {
   }
 
   Widget _buildWidgetDeStatus() {
-    // Este widget continua o mesmo da importação de produtos
     switch (_status) {
       case StatusImportacao.carregando:
         return Center(

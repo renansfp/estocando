@@ -1,19 +1,17 @@
-// VERSÃO FINAL E COMPLETA - TELA HOME COM TODAS AS CORREÇÕES
+// VERSÃO FINAL E COMPLETA - TELA HOME (04/10/2025)
 
 import 'dart:async';
 import 'dart:io';
 import 'package:estocando/telas/tela_historico.dart';
-import 'package:estocando/models/movimentacao.dart'; // ---> ADICIONEI ESTA LINHA QUE FALTAVA <---
+import 'package:estocando/models/movimentacao.dart';
 import 'package:flutter/foundation.dart';
 import 'package:universal_html/html.dart' as html;
-
 import 'package:estocando/telas/tela_aprovacao_usuarios.dart';
 import 'package:estocando/telas/tela_cadastro_parceiro.dart';
 import 'package:estocando/telas/tela_extrato_movimentacoes.dart';
 import 'package:estocando/telas/tela_importacao_movimentacoes.dart';
 import 'package:estocando/telas/tela_importacao_parceiros.dart';
 import 'package:estocando/telas/tela_importacao_produtos.dart';
-import 'package:estocando/telas/tela_login.dart';
 import 'package:estocando/telas/tela_movimentacao.dart';
 import 'package:estocando/telas/tela_parceiros.dart';
 import 'package:flutter/material.dart';
@@ -42,29 +40,32 @@ class _TelaHomeState extends State<TelaHome> {
   Timer? _debounce;
 
   String? _permissaoUsuario;
-  bool _carregandoPermissao = true;
+  String? _empresaId;
+  bool _carregandoDadosIniciais = true;
 
   @override
   void initState() {
     super.initState();
     _searchController.addListener(_onSearchChanged);
-    _carregarPermissaoUsuario();
+    _carregarDadosUsuario();
   }
 
-  Future<void> _carregarPermissaoUsuario() async {
+  Future<void> _carregarDadosUsuario() async {
     User? user = FirebaseAuth.instance.currentUser;
     if (user != null) {
       DocumentSnapshot userData = await FirebaseFirestore.instance.collection('usuarios').doc(user.uid).get();
 
       if (mounted && userData.exists) {
+        final data = userData.data() as Map<String, dynamic>;
         setState(() {
-          _permissaoUsuario = (userData.data() as Map<String, dynamic>)['permissao'];
+          _permissaoUsuario = data['permissao'];
+          _empresaId = data['empresaId'];
         });
       }
     }
     if (mounted) {
       setState(() {
-        _carregandoPermissao = false;
+        _carregandoDadosIniciais = false;
       });
     }
   }
@@ -88,12 +89,25 @@ class _TelaHomeState extends State<TelaHome> {
 
   Future<void> _exportarProdutosParaExcel() async {
     try {
+      if (_empresaId == null) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Erro: ID da empresa não encontrado. Tente novamente.'),
+          backgroundColor: Colors.red,
+        ));
+        return;
+      }
+
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
         content: Text('Gerando relatório... Por favor, aguarde.'),
         backgroundColor: Colors.blue,
       ));
 
-      final querySnapshot = await FirebaseFirestore.instance.collection('produtos').orderBy('nome').get();
+      final querySnapshot = await FirebaseFirestore.instance
+          .collection('produtos')
+          .where('empresaId', isEqualTo: _empresaId)
+          .orderBy('nome')
+          .get();
+
       final produtos = querySnapshot.docs;
 
       var excel = Excel.createExcel();
@@ -141,10 +155,12 @@ class _TelaHomeState extends State<TelaHome> {
         }
       }
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text('Erro ao exportar: $e'),
-        backgroundColor: Colors.red,
-      ));
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('Erro ao exportar: $e'),
+          backgroundColor: Colors.red,
+        ));
+      }
     }
   }
 
@@ -158,7 +174,12 @@ class _TelaHomeState extends State<TelaHome> {
 
   @override
   Widget build(BuildContext context) {
-    Query query = FirebaseFirestore.instance.collection('produtos').orderBy('nome');
+    Query query = FirebaseFirestore.instance.collection('produtos').where('empresaId', isEqualTo: 'dummy_id');
+
+    if (_empresaId != null) {
+      query = FirebaseFirestore.instance.collection('produtos')
+          .where('empresaId', isEqualTo: _empresaId);
+    }
 
     if (_filtroAtual == FiltroProdutos.ativos || _filtroAtual == FiltroProdutos.pontoDePedido) {
       query = query.where('ativo', isEqualTo: true);
@@ -166,11 +187,15 @@ class _TelaHomeState extends State<TelaHome> {
       query = query.where('ativo', isEqualTo: false);
     }
 
+    query = query.orderBy('nome');
+
     return Scaffold(
       appBar: _buildAppBar(),
-      drawer: _carregandoPermissao ? const Drawer(child: Center(child: CircularProgressIndicator())) : _buildDrawer(context),
+      drawer: _carregandoDadosIniciais ? const Drawer(child: Center(child: CircularProgressIndicator())) : _buildDrawer(context),
       floatingActionButton: _buildSpeedDial(context),
-      body: StreamBuilder<QuerySnapshot>(
+      body: _carregandoDadosIniciais
+          ? const Center(child: CircularProgressIndicator())
+          : StreamBuilder<QuerySnapshot>(
         stream: query.snapshots(),
         builder: (context, snapshot) {
           if (snapshot.hasError) return const Center(child: Text('Ocorreu um erro ao carregar os produtos.'));
@@ -284,7 +309,7 @@ class _TelaHomeState extends State<TelaHome> {
           decoration: const InputDecoration(hintText: 'Buscar por código ou nome...', hintStyle: TextStyle(color: Colors.white70), border: InputBorder.none),
           style: const TextStyle(color: Colors.white),
         ),
-        actions: [IconButton(icon: const Icon(Icons.clear), onPressed: () => _searchController.clear())],
+        actions: [IconButton(icon: const Icon(Icons.clear), onPressed: () => setState(() => _searchController.clear()))],
       );
     }
   }
@@ -332,6 +357,7 @@ class _TelaHomeState extends State<TelaHome> {
             },
           ),
           const Divider(),
+
           if (_permissaoUsuario == 'admin') ...[
             const Padding(
                 padding: EdgeInsets.symmetric(horizontal: 16.0),
@@ -362,6 +388,7 @@ class _TelaHomeState extends State<TelaHome> {
                 }
             ),
           ],
+
           ListTile(
             title: const Text('Exportar Produtos (Excel)'),
             leading: const Icon(Icons.download_for_offline),
@@ -370,6 +397,7 @@ class _TelaHomeState extends State<TelaHome> {
               _exportarProdutosParaExcel();
             },
           ),
+
           if (_permissaoUsuario == 'admin') ...[
             const Divider(),
             const Padding(
@@ -385,6 +413,7 @@ class _TelaHomeState extends State<TelaHome> {
               },
             ),
           ],
+
           const Divider(),
           ListTile(
             title: const Text('Sair'),
@@ -402,7 +431,6 @@ class _TelaHomeState extends State<TelaHome> {
     final data = produtoDoc.data() as Map<String, dynamic>;
     final double quantidade = (data['quantidadeAtual'] ?? 0.0).toDouble();
     final double estoqueMinimo = (data['estoqueMinimo'] ?? 0.0).toDouble();
-    final double estoqueMaximo = (data['estoqueMaximo'] ?? 0.0).toDouble();
     final String? numeroSC = data['numeroSC'];
     final double valorUnitario = (data['valor'] ?? 0.0).toDouble();
     final formatoMoeda = NumberFormat.currency(locale: 'pt_BR', symbol: 'R\$');
@@ -437,10 +465,10 @@ class _TelaHomeState extends State<TelaHome> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(statusText, style: TextStyle(color: statusColor, fontWeight: FontWeight.bold)),
-                      if (estoqueMinimo > 0 || estoqueMaximo > 0)
+                      if (estoqueMinimo > 0 || (data['estoqueMaximo'] ?? 0.0) > 0)
                         Padding(
                           padding: const EdgeInsets.only(top: 4.0),
-                          child: Text('Min: ${_formatarQuantidade(estoqueMinimo)} / Max: ${_formatarQuantidade(estoqueMaximo)}', style: const TextStyle(fontSize: 12, color: Colors.black54)),
+                          child: Text('Min: ${_formatarQuantidade(estoqueMinimo)} / Max: ${_formatarQuantidade((data['estoqueMaximo'] ?? 0.0).toDouble())}', style: const TextStyle(fontSize: 12, color: Colors.black54)),
                         ),
                       if (numeroSC != null && numeroSC.isNotEmpty)
                         Padding(
@@ -566,7 +594,7 @@ class _TelaHomeState extends State<TelaHome> {
               child: const Text('Salvar'),
               onPressed: () async {
                 await FirebaseFirestore.instance.collection('produtos').doc(produtoDoc.id).update({'numeroSC': scController.text.trim()});
-                Navigator.of(context).pop();
+                if(mounted) Navigator.of(context).pop();
               },
             ),
           ],
@@ -588,7 +616,7 @@ class _TelaHomeState extends State<TelaHome> {
             child: const Text('Excluir', style: TextStyle(color: Colors.red)),
             onPressed: () async {
               await FirebaseFirestore.instance.collection('produtos').doc(produtoDoc.id).delete();
-              Navigator.of(context).pop();
+              if(mounted) Navigator.of(context).pop();
             },
           ),
         ],

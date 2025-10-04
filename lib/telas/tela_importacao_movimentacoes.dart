@@ -1,7 +1,10 @@
+// CÓDIGO FINAL E SEGURO - TELA DE IMPORTAÇÃO DE MOVIMENTAÇÕES
+
 import 'dart:convert';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:csv/csv.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:firebase_auth/firebase_auth.dart'; // ---> MUDANÇA 1
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
@@ -16,21 +19,58 @@ class TelaImportacaoMovimentacoes extends StatefulWidget {
 class _TelaImportacaoMovimentacoesState
     extends State<TelaImportacaoMovimentacoes> {
   bool _isLoading = false;
-  String _log = 'Aguardando seleção de arquivo CSV...\n\n';
+  String _log = 'Aguardando seleção da empresa...\n';
   String _fileName = '';
 
-  Future<void> _iniciarImportacao() async {
-    // 1. SELEÇÃO DO ARQUIVO
-    final result = await FilePicker.platform.pickFiles(
-      type: FileType.custom,
-      allowedExtensions: ['csv'],
-      withData: true,
-    );
+  // ---> MUDANÇA 2: Variáveis para seleção de empresa
+  List<Map<String, String>> _listaEmpresas = [];
+  Map<String, String>? _empresaSelecionada;
+  bool _carregandoEmpresas = true;
 
+  @override
+  void initState() {
+    super.initState();
+    _carregarEmpresas(); // ---> MUDANÇA 3
+  }
+
+  // ---> MUDANÇA 4: Nova função para carregar as empresas
+  Future<void> _carregarEmpresas() async {
+    try {
+      final usuariosSnapshot = await FirebaseFirestore.instance.collection('usuarios').get();
+      if (!mounted) return;
+      final Map<String, String> empresasMap = {};
+      for (var userDoc in usuariosSnapshot.docs) {
+        final data = userDoc.data();
+        final empresaId = data['empresaId'] as String?;
+        final nomeEmpresa = data['nome'] as String?;
+        if (empresaId != null && nomeEmpresa != null) {
+          empresasMap.putIfAbsent(empresaId, () => nomeEmpresa);
+        }
+      }
+      final listaFormatada = empresasMap.entries.map((entry) => {'id': entry.key, 'nome': entry.value}).toList();
+      setState(() {
+        _listaEmpresas = listaFormatada;
+        _carregandoEmpresas = false;
+      });
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _log = "Erro ao carregar empresas: $e";
+          _carregandoEmpresas = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _iniciarImportacao() async {
+    if (_empresaSelecionada == null) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Por favor, selecione uma empresa primeiro.')));
+      return;
+    }
+
+    final result = await FilePicker.platform.pickFiles(type: FileType.custom, allowedExtensions: ['csv'], withData: true);
     if (result == null || result.files.single.bytes == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Nenhum arquivo selecionado ou o arquivo não pôde ser lido.')),
-      );
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Nenhum arquivo selecionado.')));
       return;
     }
 
@@ -40,59 +80,42 @@ class _TelaImportacaoMovimentacoesState
       _log = 'Lendo arquivo "$_fileName"...\n';
     });
 
-    // 2. LEITURA E CONVERSÃO DO CSV
     final bytes = result.files.single.bytes!;
     final csvString = utf8.decode(bytes);
-    final List<List<dynamic>> rows =
-    const CsvToListConverter(fieldDelimiter: ',').convert(csvString);
+    final List<List<dynamic>> rows = const CsvToListConverter().convert(csvString);
 
     if (rows.length < 2) {
-      setState(() {
-        _isLoading = false;
-        _log += 'ERRO: O arquivo CSV está vazio ou contém apenas o cabeçalho.\n';
-      });
+      setState(() { _isLoading = false; _log += 'ERRO: O arquivo CSV está vazio ou contém apenas o cabeçalho.\n'; });
       return;
     }
 
-    // 3. MAPEAMENTO DO CABEÇALHO
     final headers = rows.first.map((h) => h.toString().toLowerCase().trim()).toList();
     final requiredHeaders = ['codigo', 'quantidade', 'tipo', 'data'];
     if (!requiredHeaders.every((h) => headers.contains(h))) {
-      setState(() {
-        _isLoading = false;
-        _log += 'ERRO: O cabeçalho do arquivo deve conter as colunas: ${requiredHeaders.join(', ')}\n';
-      });
+      setState(() { _isLoading = false; _log += 'ERRO: O cabeçalho deve conter: ${requiredHeaders.join(', ')}\n'; });
       return;
     }
 
     final db = FirebaseFirestore.instance;
     int sucessos = 0;
     final List<String> erros = [];
+    final String empresaId = _empresaSelecionada!['id']!;
 
-    // 4. PROCESSAMENTO DAS LINHAS
     for (int i = 1; i < rows.length; i++) {
       final row = rows[i];
       final linhaNum = i + 1;
 
-      setState(() {
-        _log = 'Processando linha $linhaNum de ${rows.length - 1}...\n';
-      });
+      setState(() { _log = 'Processando linha $linhaNum de ${rows.length - 1}...\n'; });
 
       try {
         final codigo = row[headers.indexOf('codigo')].toString().trim();
-        // O "PORQUÊ": A lógica aqui agora é idêntica à do valor_unitario.
-        // Trocamos int.tryParse por double.tryParse e adicionamos o replaceAll
-        // para aceitar tanto "1,5" quanto "1.5" como números decimais.
         final quantidadeStr = row[headers.indexOf('quantidade')].toString().replaceAll(',', '.').trim();
         final tipo = row[headers.indexOf('tipo')].toString().trim().toLowerCase();
         final dataStr = row[headers.indexOf('data')].toString().trim();
-
-        // Dados opcionais
         final destino = headers.contains('destino') ? row[headers.indexOf('destino')].toString().trim() : null;
         final valorUnitarioStr = headers.contains('valor_unitario') ? row[headers.indexOf('valor_unitario')].toString().replaceAll(',', '.').trim() : null;
         final centroCusto = headers.contains('centro_custo') ? row[headers.indexOf('centro_custo')].toString().trim() : null;
 
-        // Validações
         if (codigo.isEmpty) throw Exception('Código do produto está vazio.');
         if (tipo != 'entrada' && tipo != 'saida') throw Exception('Tipo deve ser "entrada" ou "saida".');
         final quantidade = double.tryParse(quantidadeStr);
@@ -100,36 +123,36 @@ class _TelaImportacaoMovimentacoesState
         final data = DateFormat('dd/MM/yyyy').parse(dataStr);
         final valorUnitario = valorUnitarioStr != null ? double.tryParse(valorUnitarioStr) : null;
 
-        // 5. TRANSAÇÃO ATÔMICA NO FIRESTORE
         await db.runTransaction((transaction) async {
-          // Busca o produto pelo código
-          final produtoQuery = await db.collection('produtos').where('codigo', isEqualTo: codigo).limit(1).get();
+          // ---> MUDANÇA 5: A busca pelo produto agora é filtrada por empresa.
+          final produtoQuery = await db.collection('produtos')
+              .where('empresaId', isEqualTo: empresaId)
+              .where('codigo', isEqualTo: codigo)
+              .limit(1)
+              .get();
+
           if (produtoQuery.docs.isEmpty) {
-            throw Exception('Produto com código "$codigo" não encontrado.');
+            throw Exception('Produto com código "$codigo" não encontrado na empresa selecionada.');
           }
           final produtoRef = produtoQuery.docs.first.reference;
           final produtoSnapshot = await transaction.get(produtoRef);
           final produtoData = produtoSnapshot.data() as Map<String, dynamic>;
 
-          // O "PORQUÊ": A quantidade em estoque agora é tratada como double.
-          // Usamos .toDouble() para garantir que a soma seja feita com precisão decimal.
           final quantidadeAtual = (produtoData['quantidadeAtual'] ?? 0.0).toDouble();
-          final novaQuantidade = tipo == 'entrada'
-              ? quantidadeAtual + quantidade
-              : quantidadeAtual - quantidade;
+          final novaQuantidade = tipo == 'entrada' ? quantidadeAtual + quantidade : quantidadeAtual - quantidade;
 
-          // Atualiza o produto
           transaction.update(produtoRef, {'quantidadeAtual': novaQuantidade});
 
-          // Cria a movimentação
           final movRef = db.collection('movimentacoes').doc();
+          // ---> MUDANÇA 6: "Carimbamos" a nova movimentação com o empresaId.
           transaction.set(movRef, {
+            'empresaId': empresaId,
             'produtoId': produtoRef.id,
             'produtoNome': produtoData['nome'] ?? 'N/D',
             'produtoCodigo': codigo,
             'tipo': tipo,
             'subTipo': destino ?? 'Importado',
-            'quantidade': quantidade, // Agora salva um double
+            'quantidade': quantidade,
             'data': Timestamp.fromDate(data),
             'valorUnitario': valorUnitario,
             'centroDeCusto': centroCusto,
@@ -143,10 +166,9 @@ class _TelaImportacaoMovimentacoesState
       }
     }
 
-    // 6. RELATÓRIO FINAL
     setState(() {
       _isLoading = false;
-      _log = 'Importação de "$_fileName" concluída!\n\n'
+      _log = 'Importação para "${_empresaSelecionada!['nome']}" concluída!\n\n'
           'Resultados:\n'
           '- $sucessos movimentações importadas com sucesso.\n'
           '- ${erros.length} linhas com erro.\n\n'
@@ -156,17 +178,20 @@ class _TelaImportacaoMovimentacoesState
   }
 
   Future<void> _resetarDados() async {
-    setState(() {
-      _isLoading = true;
-      _log = 'Iniciando a redefinição de dados...\n';
-    });
+    if (_empresaSelecionada == null) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Por favor, selecione uma empresa para redefinir os dados.')));
+      return;
+    }
+
+    setState(() { _isLoading = true; _log = 'Iniciando a redefinição de dados para "${_empresaSelecionada!['nome']}"...\n'; });
 
     final db = FirebaseFirestore.instance;
+    final String empresaId = _empresaSelecionada!['id']!;
 
     try {
-      // 1. Apagar todas as movimentações
-      setState(() => _log += 'Apagando movimentações antigas...\n');
-      final movSnapshot = await db.collection('movimentacoes').get();
+      // ---> MUDANÇA 7: A busca por movimentações para apagar agora é filtrada por empresa.
+      setState(() => _log += 'Apagando movimentações antigas da empresa...\n');
+      final movSnapshot = await db.collection('movimentacoes').where('empresaId', isEqualTo: empresaId).get();
       final batchDelete = db.batch();
       for (final doc in movSnapshot.docs) {
         batchDelete.delete(doc.reference);
@@ -174,9 +199,9 @@ class _TelaImportacaoMovimentacoesState
       await batchDelete.commit();
       setState(() => _log += '- ${movSnapshot.docs.length} movimentações foram apagadas.\n');
 
-      // 2. Redefinir o estoque de todos os produtos para 0
-      setState(() => _log += 'Redefinindo estoque dos produtos para zero...\n');
-      final prodSnapshot = await db.collection('produtos').get();
+      // ---> MUDANÇA 8: A busca por produtos para zerar o estoque agora é filtrada por empresa.
+      setState(() => _log += 'Redefinindo estoque dos produtos da empresa para zero...\n');
+      final prodSnapshot = await db.collection('produtos').where('empresaId', isEqualTo: empresaId).get();
       final batchUpdate = db.batch();
       for (final doc in prodSnapshot.docs) {
         batchUpdate.update(doc.reference, {'quantidadeAtual': 0});
@@ -184,7 +209,7 @@ class _TelaImportacaoMovimentacoesState
       await batchUpdate.commit();
       setState(() => _log += '- ${prodSnapshot.docs.length} produtos tiveram seu estoque zerado.\n\n');
 
-      _log += 'Redefinição concluída! Você já pode importar o novo arquivo.\n';
+      _log += 'Redefinição concluída! Você já pode importar o novo arquivo para esta empresa.\n';
 
     } catch (e) {
       _log += 'ERRO DURANTE A REDEFINIÇÃO: ${e.toString()}\n';
@@ -196,13 +221,17 @@ class _TelaImportacaoMovimentacoesState
   }
 
   void _mostrarDialogoReset() {
+    if (_empresaSelecionada == null) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Por favor, selecione uma empresa antes de redefinir os dados.')));
+      return;
+    }
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('⚠️ ATENÇÃO: Ação Irreversível'),
-        content: const Text(
-            'Você tem certeza que deseja apagar TODAS as movimentações e ZERAR o estoque de TODOS os produtos?\n\n'
-                'Use esta função apenas antes da primeira importação de dados históricos.'
+        content: Text(
+            'Você tem certeza que deseja apagar TODAS as movimentações e ZERAR o estoque de TODOS os produtos da empresa "${_empresaSelecionada!['nome']}"?\n\n'
+                'Esta ação não pode ser desfeita.'
         ),
         actions: [
           TextButton(
@@ -211,7 +240,7 @@ class _TelaImportacaoMovimentacoesState
           ),
           ElevatedButton(
             style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
-            child: const Text('Sim, apagar tudo'),
+            child: const Text('Sim, apagar dados da empresa'),
             onPressed: () {
               Navigator.of(ctx).pop();
               _resetarDados();
@@ -221,7 +250,6 @@ class _TelaImportacaoMovimentacoesState
       ),
     );
   }
-
 
   @override
   Widget build(BuildContext context) {
@@ -234,12 +262,37 @@ class _TelaImportacaoMovimentacoesState
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
+            // ---> MUDANÇA 9: Seletor de empresa adicionado ao topo da tela.
+            if (_carregandoEmpresas)
+              const Center(child: CircularProgressIndicator())
+            else
+              DropdownButtonFormField<Map<String, String>>(
+                value: _empresaSelecionada,
+                hint: const Text('1. Selecione a Empresa'),
+                isExpanded: true,
+                items: _listaEmpresas.map((empresa) {
+                  return DropdownMenuItem<Map<String, String>>(
+                    value: empresa,
+                    child: Text(empresa['nome'] ?? 'Empresa Desconhecida'),
+                  );
+                }).toList(),
+                onChanged: (valor) {
+                  setState(() {
+                    _empresaSelecionada = valor;
+                    _log = 'Empresa selecionada. Agora selecione o arquivo de movimentações.';
+                  });
+                },
+                decoration: const InputDecoration(border: OutlineInputBorder()),
+              ),
+            const SizedBox(height: 20),
+
             ElevatedButton.icon(
               icon: const Icon(Icons.file_upload),
-              label: const Text('Selecionar Arquivo CSV'),
-              onPressed: _isLoading ? null : _iniciarImportacao,
+              label: const Text('2. Selecionar e Importar CSV'),
+              onPressed: (_isLoading || _empresaSelecionada == null) ? null : _iniciarImportacao,
               style: ElevatedButton.styleFrom(
-                padding: const EdgeInsets.symmetric(vertical: 16),
+                  padding: const EdgeInsets.symmetric(vertical: 16),
+                  disabledBackgroundColor: Colors.grey.shade300
               ),
             ),
             const SizedBox(height: 20),
@@ -272,8 +325,8 @@ class _TelaImportacaoMovimentacoesState
               padding: const EdgeInsets.symmetric(vertical: 8.0),
               child: TextButton.icon(
                 icon: const Icon(Icons.warning_amber_rounded),
-                label: const Text('Redefinir Dados (Apagar Tudo)'),
-                onPressed: _isLoading ? null : _mostrarDialogoReset,
+                label: const Text('Redefinir Dados da Empresa'),
+                onPressed: (_isLoading || _empresaSelecionada == null) ? null : _mostrarDialogoReset,
                 style: TextButton.styleFrom(
                   foregroundColor: Colors.red,
                 ),
@@ -285,4 +338,3 @@ class _TelaImportacaoMovimentacoesState
     );
   }
 }
-

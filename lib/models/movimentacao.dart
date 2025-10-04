@@ -1,5 +1,4 @@
-// Arquivo: lib/models/movimentacao.dart
-// VERSÃO REFATORADA PARA FIREBASE
+// Arquivo: lib/models/movimentacao.dart (VERSÃO ATUALIZADA)
 
 enum TipoMovimentacao {
   entrada,
@@ -12,8 +11,6 @@ class Movimentacao {
   final String produtoCodigo;
 
   final TipoMovimentacao tipo;
-  // O "PORQUÊ": Esta é a correção principal. Alteramos o tipo de 'int' para
-  // 'double' para que a classe possa aceitar quantidades com casas decimais.
   final double quantidade;
   final DateTime data;
   final String? subTipo;
@@ -29,6 +26,9 @@ class Movimentacao {
   final String? numeroAG;
   final String? nomeColaborador;
   final String? centroDeCusto;
+
+  // ---> MUDANÇA 1: Adicionamos o campo para o ID da empresa. <---
+  final String empresaId;
 
   Movimentacao({
     required this.produtoId,
@@ -48,6 +48,8 @@ class Movimentacao {
     this.numeroAG,
     this.nomeColaborador,
     this.centroDeCusto,
+    // ---> MUDANÇA 2: Tornamos o campo obrigatório ao criar uma nova movimentação. <---
+    required this.empresaId,
   });
 
   Map<String, dynamic> toJson() => {
@@ -68,6 +70,8 @@ class Movimentacao {
     'numeroAG': numeroAG,
     'nomeColaborador': nomeColaborador,
     'centroDeCusto': centroDeCusto,
+    // ---> MUDANÇA 3: Adicionamos ao "tradutor" para JSON (salvar no Firebase). <---
+    'empresaId': empresaId,
   };
 
   factory Movimentacao.fromJson(Map<String, dynamic> json) {
@@ -76,8 +80,6 @@ class Movimentacao {
       produtoNome: json['produtoNome'] ?? 'PRODUTO NÃO ENCONTRADO',
       produtoCodigo: json['produtoCodigo'] ?? 'N/A',
       tipo: TipoMovimentacao.values.byName(json['tipo']),
-      // O "PORQUÊ": Ao ler do Firebase, garantimos que o número seja
-      // convertido para 'double', não importa se ele foi salvo como int ou double.
       quantidade: (json['quantidade'] as num).toDouble(),
       data: DateTime.parse(json['data']),
       subTipo: json['subTipo'],
@@ -92,6 +94,8 @@ class Movimentacao {
       numeroAG: json['numeroAG'],
       nomeColaborador: json['nomeColaborador'],
       centroDeCusto: json['centroDeCusto'],
+      // ---> MUDANÇA 4: Adicionamos ao "tradutor" que lê do Firebase. <---
+      empresaId: json['empresaId'] ?? '',
     );
   }
 }

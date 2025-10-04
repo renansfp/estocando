@@ -1,5 +1,8 @@
+// CÓDIGO FINAL E SEGURO - TELA DE EXTRATO DE MOVIMENTAÇÕES
+
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart'; // ---> MUDANÇA 1: Importamos para pegar o usuário.
 import 'package:intl/intl.dart';
 
 class TelaExtratoMovimentacoes extends StatefulWidget {
@@ -12,33 +15,58 @@ class TelaExtratoMovimentacoes extends StatefulWidget {
 class _TelaExtratoMovimentacoesState extends State<TelaExtratoMovimentacoes> {
   DateTime? _dataInicio;
   DateTime? _dataFim;
-  // MODIFICAÇÃO INÍCIO (Passo 3): Variável de estado para o novo filtro
-  String _tipoFiltro = 'todos'; // Opções: 'todos', 'entrada', 'saida'
-  // MODIFICAÇÃO FIM (Passo 3)
+  String _tipoFiltro = 'todos';
+
+  // ---> MUDANÇA 2: Novas variáveis para guardar o empresaId e controlar o loading.
+  String? _empresaId;
+  bool _carregandoDadosIniciais = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _carregarDadosUsuario(); // ---> MUDANÇA 3: Chamamos a função para buscar o empresaId.
+  }
+
+  // ---> MUDANÇA 4: Nova função para buscar o empresaId do usuário logado.
+  Future<void> _carregarDadosUsuario() async {
+    User? user = FirebaseAuth.instance.currentUser;
+    if (user != null) {
+      DocumentSnapshot userDoc = await FirebaseFirestore.instance.collection('usuarios').doc(user.uid).get();
+      if (mounted && userDoc.exists) {
+        setState(() {
+          _empresaId = (userDoc.data() as Map<String, dynamic>)['empresaId'];
+          _carregandoDadosIniciais = false;
+        });
+      }
+    } else {
+      setState(() {
+        _carregandoDadosIniciais = false;
+      });
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
-    Query? query; // A query pode ser nula inicialmente
+    Query? query;
 
-    // A query só é construída se as datas forem selecionadas
-    if (_dataInicio != null && _dataFim != null) {
+    // A query só é construída se as datas E o empresaId existirem
+    if (_dataInicio != null && _dataFim != null && _empresaId != null) {
+      // ---> MUDANÇA 5 (A MAIS IMPORTANTE): A consulta agora é segura!
       query = FirebaseFirestore.instance
           .collection('movimentacoes')
-          .orderBy('data', descending: true);
+          .where('empresaId', isEqualTo: _empresaId); // <-- FILTRO DE SEGURANÇA
 
-      // Aplica filtro de data
+      query = query.orderBy('data', descending: true);
+
       query = query.where('data', isGreaterThanOrEqualTo: _dataInicio!.toIso8601String());
       final dataFimCompleta = DateTime(_dataFim!.year, _dataFim!.month, _dataFim!.day, 23, 59, 59);
       query = query.where('data', isLessThanOrEqualTo: dataFimCompleta.toIso8601String());
 
-      // MODIFICAÇÃO INÍCIO (Passo 3): Aplica o filtro de tipo (entrada/saida)
       if (_tipoFiltro == 'entrada') {
         query = query.where('tipo', isEqualTo: 'entrada');
       } else if (_tipoFiltro == 'saida') {
         query = query.where('tipo', isEqualTo: 'saida');
       }
-      // Se for 'todos', nenhum filtro de tipo é aplicado.
-      // MODIFICAÇÃO FIM (Passo 3)
     }
 
     return Scaffold(
@@ -46,23 +74,19 @@ class _TelaExtratoMovimentacoesState extends State<TelaExtratoMovimentacoes> {
         title: const Text('Extrato de Movimentações'),
         backgroundColor: Colors.teal,
       ),
-      body: Column(
+      body: _carregandoDadosIniciais
+          ? const Center(child: CircularProgressIndicator())
+          : Column(
         children: [
           Padding(
             padding: const EdgeInsets.fromLTRB(8, 16, 8, 8),
             child: _buildSeletorDePeriodo(),
           ),
-
-          // MODIFICAÇÃO INÍCIO (Passo 3): Adicionamos o widget do filtro de tipo
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 4.0),
             child: _buildFiltroTipo(),
           ),
-          // MODIFICAÇÃO FIM (Passo 3)
-
           Expanded(
-            // MODIFICAÇÃO INÍCIO (Passo 3): Lógica de otimização
-            // O conteúdo principal agora depende se a query foi construída (se as datas foram selecionadas)
             child: query == null
                 ? const Center(
               child: Padding(
@@ -92,7 +116,6 @@ class _TelaExtratoMovimentacoesState extends State<TelaExtratoMovimentacoes> {
                 return ListView.builder(
                   itemCount: movimentacoes.length,
                   itemBuilder: (context, index) {
-                    // O itemBuilder continua o mesmo, sem alterações
                     final mov = movimentacoes[index];
                     final dados = mov.data() as Map<String, dynamic>;
 
@@ -127,14 +150,12 @@ class _TelaExtratoMovimentacoesState extends State<TelaExtratoMovimentacoes> {
                 );
               },
             ),
-            // MODIFICAÇÃO FIM (Passo 3)
           ),
         ],
       ),
     );
   }
 
-  // Métodos _selecionarData e _limparFiltroDePeriodo continuam os mesmos
   Future<void> _selecionarData(BuildContext context, {required bool isDataInicio}) async {
     final dataSelecionada = await showDatePicker(
         context: context,
@@ -159,7 +180,6 @@ class _TelaExtratoMovimentacoesState extends State<TelaExtratoMovimentacoes> {
     });
   }
 
-  // Widget _buildSeletorDePeriodo continua o mesmo
   Widget _buildSeletorDePeriodo() {
     return Row(
       mainAxisAlignment: MainAxisAlignment.center,
@@ -188,7 +208,6 @@ class _TelaExtratoMovimentacoesState extends State<TelaExtratoMovimentacoes> {
     );
   }
 
-  // MODIFICAÇÃO INÍCIO (Passo 3): Novo widget para os botões de filtro de tipo
   Widget _buildFiltroTipo() {
     return ToggleButtons(
       isSelected: [
@@ -215,5 +234,4 @@ class _TelaExtratoMovimentacoesState extends State<TelaExtratoMovimentacoes> {
       ],
     );
   }
-// MODIFICAÇÃO FIM (Passo 3)
 }

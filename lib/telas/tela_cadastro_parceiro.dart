@@ -1,9 +1,10 @@
-// CÓDIGO FINAL COM VALIDADOR LOCAL
+// CÓDIGO COMPLETO E CORRIGIDO COM LÓGICA DE MULTI-EMPRESA
 
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart'; // ---> MUDANÇA 1: Importamos para pegar o usuário.
 import 'package:flutter/material.dart';
 import 'package:mask_text_input_formatter/mask_text_input_formatter.dart';
-import '../utils/validadores.dart'; // MODIFICAÇÃO: Importando nosso validador local
+import '../utils/validadores.dart';
 import 'package:flutter/services.dart';
 
 enum TipoParceiro { cliente, fornecedor }
@@ -18,6 +19,11 @@ class TelaCadastroParceiro extends StatefulWidget {
 
 class _TelaCadastroParceiroState extends State<TelaCadastroParceiro> {
   final _formKey = GlobalKey<FormState>();
+
+  // ---> MUDANÇA 2: Novas variáveis para guardar o empresaId e controlar o loading.
+  String? _empresaId;
+  bool _carregandoDadosIniciais = true;
+
   final _codigoController = TextEditingController();
   final _nomeController = TextEditingController();
   final _cnpjController = TextEditingController();
@@ -33,6 +39,8 @@ class _TelaCadastroParceiroState extends State<TelaCadastroParceiro> {
   @override
   void initState() {
     super.initState();
+    _carregarDadosIniciais(); // ---> MUDANÇA 3: Chamamos a nova função para buscar dados.
+
     if (_modoEdicao) {
       final dados = widget.parceiroParaEditar!.data() as Map<String, dynamic>;
       _codigoController.text = dados['codigo'] ?? '';
@@ -41,10 +49,28 @@ class _TelaCadastroParceiroState extends State<TelaCadastroParceiro> {
 
       final cnpj = dados['cnpj'] ?? '';
       if (cnpj.isNotEmpty) {
-        _tipoDocumento = cnpj.length > 11 ? TipoDocumento.cnpj : TipoDocumento.cpf;
+        _tipoDocumento = cnpj.length > 14 ? TipoDocumento.cnpj : TipoDocumento.cpf;
         _documentoFormatter.updateMask(mask: _tipoDocumento == TipoDocumento.cnpj ? '##.###.###/####-##' : '###.###.###-##');
         _cnpjController.text = _documentoFormatter.maskText(cnpj);
       }
+    }
+  }
+
+  // ---> MUDANÇA 4: Nova função para buscar o empresaId do usuário logado.
+  Future<void> _carregarDadosIniciais() async {
+    User? user = FirebaseAuth.instance.currentUser;
+    if (user != null) {
+      DocumentSnapshot userDoc = await FirebaseFirestore.instance.collection('usuarios').doc(user.uid).get();
+      if (mounted && userDoc.exists) {
+        setState(() {
+          _empresaId = (userDoc.data() as Map<String, dynamic>)['empresaId'];
+          _carregandoDadosIniciais = false;
+        });
+      }
+    } else {
+      setState(() {
+        _carregandoDadosIniciais = false;
+      });
     }
   }
 
@@ -57,6 +83,11 @@ class _TelaCadastroParceiroState extends State<TelaCadastroParceiro> {
   }
 
   void _salvarParceiro() async {
+    if (_empresaId == null) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Erro: Não foi possível identificar a empresa. Tente novamente.'), backgroundColor: Colors.red));
+      return;
+    }
+
     if (_formKey.currentState!.validate() && !_isSalvando) {
       setState(() { _isSalvando = true; });
 
@@ -65,10 +96,23 @@ class _TelaCadastroParceiroState extends State<TelaCadastroParceiro> {
       final cnpjLimpo = _documentoFormatter.unmaskText(_cnpjController.text);
 
       try {
-        // As validações de duplicidade continuam as mesmas
-        // ... (código omitido para brevidade, mas está no seu arquivo)
+        // ---> MUDANÇA 5: Verificação de código duplicado agora é segura.
+        final query = await db.collection('parceiros')
+            .where('empresaId', isEqualTo: _empresaId)
+            .where('codigo', isEqualTo: codigo)
+            .get();
+
+        if (query.docs.isNotEmpty) {
+          if (!_modoEdicao || (_modoEdicao && query.docs.first.id != widget.parceiroParaEditar!.id)) {
+            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Erro: Este código de parceiro já existe na sua empresa.'), backgroundColor: Colors.red));
+            setState(() { _isSalvando = false; });
+            return;
+          }
+        }
 
         final dadosParceiro = {
+          // ---> MUDANÇA 6: "Carimbamos" o parceiro com o empresaId.
+          'empresaId': _empresaId,
           'codigo': codigo,
           'nome': _nomeController.text.trim(),
           'tipo': _tipoParceiro.name,
@@ -82,11 +126,15 @@ class _TelaCadastroParceiroState extends State<TelaCadastroParceiro> {
           await db.collection('parceiros').add(dadosParceiro);
         }
 
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Parceiro salvo com sucesso!'), backgroundColor: Colors.green));
-        if (mounted) Navigator.of(context).pop();
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Parceiro salvo com sucesso!'), backgroundColor: Colors.green));
+          Navigator.of(context).pop();
+        }
 
       } catch (e) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Erro: ${e.toString().replaceAll("Exception: ", "")}'), backgroundColor: Colors.red));
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Erro: ${e.toString().replaceAll("Exception: ", "")}'), backgroundColor: Colors.red));
+        }
       } finally {
         if(mounted) {
           setState(() { _isSalvando = false; });
@@ -99,7 +147,9 @@ class _TelaCadastroParceiroState extends State<TelaCadastroParceiro> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: Text(_modoEdicao ? 'Editar Parceiro' : 'Novo Parceiro')),
-      body: SingleChildScrollView(
+      body: _carregandoDadosIniciais
+          ? const Center(child: CircularProgressIndicator())
+          : SingleChildScrollView(
         padding: const EdgeInsets.all(16.0),
         child: Form(
           key: _formKey,
@@ -128,7 +178,6 @@ class _TelaCadastroParceiroState extends State<TelaCadastroParceiro> {
                 decoration: InputDecoration(labelText: _tipoDocumento == TipoDocumento.cpf ? 'CPF' : 'CNPJ'),
                 keyboardType: TextInputType.number,
                 inputFormatters: [_documentoFormatter],
-                // MODIFICAÇÃO: A lógica continua a mesma, mas agora chama NOSSAS funções
                 validator: (value) {
                   final unmaskedValue = _documentoFormatter.unmaskText(value ?? '');
                   if (unmaskedValue.isEmpty) {
@@ -151,7 +200,7 @@ class _TelaCadastroParceiroState extends State<TelaCadastroParceiro> {
 
               const SizedBox(height: 30),
               ElevatedButton(
-                  onPressed: _salvarParceiro,
+                  onPressed: _isSalvando ? null : _salvarParceiro,
                   style: ElevatedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 20)),
                   child: _isSalvando ? const CircularProgressIndicator(color: Colors.white) : const Text('Salvar')
               ),

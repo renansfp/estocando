@@ -1,10 +1,11 @@
-// CÓDIGO FINAL REFATORADO PARA TELA DE PARCEIROS COM FIREBASE E BUSCA
+// CÓDIGO CORRIGIDO COM FILTRO DE EMPRESA
+
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart'; // ---> MUDANÇA 1: Importamos para pegar o usuário.
 import 'package:flutter/material.dart';
 import 'package:mask_text_input_formatter/mask_text_input_formatter.dart';
 import 'tela_cadastro_parceiro.dart';
 
-// O enum pode ficar aqui, pois é usado pela tela de cadastro também
 enum TipoParceiro { cliente, fornecedor }
 
 class TelaParceiros extends StatefulWidget {
@@ -14,16 +15,39 @@ class TelaParceiros extends StatefulWidget {
 }
 
 class _TelaParceirosState extends State<TelaParceiros> {
-  // MODIFICAÇÃO: Variáveis de estado para a busca
   bool _isSearching = false;
   final _searchController = TextEditingController();
+
+  // ---> MUDANÇA 2: Novas variáveis para guardar o empresaId e controlar o loading.
+  String? _empresaId;
+  bool _carregandoDadosIniciais = true;
 
   @override
   void initState() {
     super.initState();
+    _carregarDadosUsuario(); // ---> MUDANÇA 3: Chamamos a função para buscar o empresaId.
     _searchController.addListener(() {
-      setState(() {}); // Reconstrói a tela a cada letra digitada na busca
+      setState(() {});
     });
+  }
+
+  // ---> MUDANÇA 4: Nova função para buscar o empresaId do usuário logado.
+  Future<void> _carregarDadosUsuario() async {
+    User? user = FirebaseAuth.instance.currentUser;
+    if (user != null) {
+      DocumentSnapshot userDoc = await FirebaseFirestore.instance.collection('usuarios').doc(user.uid).get();
+      if (mounted && userDoc.exists) {
+        setState(() {
+          _empresaId = (userDoc.data() as Map<String, dynamic>)['empresaId'];
+          _carregandoDadosIniciais = false;
+        });
+      }
+    } else {
+      // Se não houver usuário, impede o prosseguimento.
+      setState(() {
+        _carregandoDadosIniciais = false;
+      });
+    }
   }
 
   @override
@@ -34,14 +58,12 @@ class _TelaParceirosState extends State<TelaParceiros> {
 
   String _formatarDocumento(String doc) {
     if (doc.isEmpty) return 'Não informado';
+    // CNPJ tem 14 dígitos, CPF tem 11
     if (doc.length > 11) {
       return MaskTextInputFormatter(mask: '##.###.###/####-##', initialText: doc).getMaskedText();
     }
     return MaskTextInputFormatter(mask: '###.###.###-##', initialText: doc).getMaskedText();
   }
-
-  // CORREÇÃO: Lógica de telefone removida, pois removemos da tela de cadastro
-  // String _formatarTelefone(String tel) { ... }
 
   void _navegarParaCadastro({QueryDocumentSnapshot? parceiroParaEditar}) {
     Navigator.push(context, MaterialPageRoute(builder: (context) => TelaCadastroParceiro(parceiroParaEditar: parceiroParaEditar)));
@@ -60,7 +82,7 @@ class _TelaParceirosState extends State<TelaParceiros> {
           TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Cancelar')),
           TextButton(onPressed: () async {
             await FirebaseFirestore.instance.collection('parceiros').doc(parceiroDoc.id).delete();
-            Navigator.of(context).pop();
+            if(mounted) Navigator.of(context).pop();
           }, child: const Text('Excluir', style: TextStyle(color: Colors.red))),
         ],
       ),
@@ -70,10 +92,16 @@ class _TelaParceirosState extends State<TelaParceiros> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      // MODIFICAÇÃO: AppBar agora é construída por uma função auxiliar
       appBar: _buildAppBar(),
-      body: StreamBuilder<QuerySnapshot>(
-        stream: FirebaseFirestore.instance.collection('parceiros').orderBy('nome').snapshots(),
+      body: _carregandoDadosIniciais
+          ? const Center(child: CircularProgressIndicator())
+          : StreamBuilder<QuerySnapshot>(
+        // ---> MUDANÇA 5: A consulta agora é segura e filtrada pelo empresaId!
+        stream: FirebaseFirestore.instance
+            .collection('parceiros')
+            .where('empresaId', isEqualTo: _empresaId)
+            .orderBy('nome')
+            .snapshots(),
         builder: (context, snapshot) {
           if (snapshot.hasError) {
             return const Center(child: Text('Erro ao carregar os parceiros.'));
@@ -85,7 +113,6 @@ class _TelaParceirosState extends State<TelaParceiros> {
             return const Center(child: Text('Nenhum cliente ou fornecedor cadastrado.', style: TextStyle(fontSize: 18, color: Colors.grey)));
           }
 
-          // MODIFICAÇÃO: Lógica de filtragem da busca
           List<QueryDocumentSnapshot> parceiros = snapshot.data!.docs;
           final String query = _searchController.text.toLowerCase().trim();
 
@@ -119,9 +146,8 @@ class _TelaParceirosState extends State<TelaParceiros> {
                 child: ListTile(
                   leading: CircleAvatar(backgroundColor: isCliente ? Colors.blueAccent : Colors.orangeAccent, child: Icon(isCliente ? Icons.person : Icons.store, color: Colors.white)),
                   title: Text('$codigo - $nome', style: const TextStyle(fontWeight: FontWeight.bold)),
-                  // CORREÇÃO: Removido o telefone do subtítulo
                   subtitle: Text('Doc: ${_formatarDocumento(cnpj)}'),
-                  isThreeLine: false, // Não precisa mais de 3 linhas
+                  isThreeLine: false,
                   trailing: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
@@ -139,7 +165,6 @@ class _TelaParceirosState extends State<TelaParceiros> {
     );
   }
 
-  // MODIFICAÇÃO: Função para construir a AppBar dinâmica
   AppBar _buildAppBar() {
     if (!_isSearching) {
       return AppBar(
