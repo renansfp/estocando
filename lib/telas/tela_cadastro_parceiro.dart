@@ -1,7 +1,7 @@
-// CÓDIGO COMPLETO E CORRIGIDO COM LÓGICA DE MULTI-EMPRESA
+// CÓDIGO COMPLETO COM PONTOS DE DEBUG
 
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_auth/firebase_auth.dart'; // ---> MUDANÇA 1: Importamos para pegar o usuário.
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:mask_text_input_formatter/mask_text_input_formatter.dart';
 import '../utils/validadores.dart';
@@ -20,7 +20,6 @@ class TelaCadastroParceiro extends StatefulWidget {
 class _TelaCadastroParceiroState extends State<TelaCadastroParceiro> {
   final _formKey = GlobalKey<FormState>();
 
-  // ---> MUDANÇA 2: Novas variáveis para guardar o empresaId e controlar o loading.
   String? _empresaId;
   bool _carregandoDadosIniciais = true;
 
@@ -39,7 +38,7 @@ class _TelaCadastroParceiroState extends State<TelaCadastroParceiro> {
   @override
   void initState() {
     super.initState();
-    _carregarDadosIniciais(); // ---> MUDANÇA 3: Chamamos a nova função para buscar dados.
+    _carregarDadosIniciais();
 
     if (_modoEdicao) {
       final dados = widget.parceiroParaEditar!.data() as Map<String, dynamic>;
@@ -56,14 +55,19 @@ class _TelaCadastroParceiroState extends State<TelaCadastroParceiro> {
     }
   }
 
-  // ---> MUDANÇA 4: Nova função para buscar o empresaId do usuário logado.
   Future<void> _carregarDadosIniciais() async {
     User? user = FirebaseAuth.instance.currentUser;
     if (user != null) {
       DocumentSnapshot userDoc = await FirebaseFirestore.instance.collection('usuarios').doc(user.uid).get();
+
+      // <--- DEBUG 1: Verificando o que vem do banco de dados.
+
+
       if (mounted && userDoc.exists) {
         setState(() {
           _empresaId = (userDoc.data() as Map<String, dynamic>)['empresaId'];
+
+
           _carregandoDadosIniciais = false;
         });
       }
@@ -83,6 +87,7 @@ class _TelaCadastroParceiroState extends State<TelaCadastroParceiro> {
   }
 
   void _salvarParceiro() async {
+
     if (_empresaId == null) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Erro: Não foi possível identificar a empresa. Tente novamente.'), backgroundColor: Colors.red));
       return;
@@ -96,7 +101,6 @@ class _TelaCadastroParceiroState extends State<TelaCadastroParceiro> {
       final cnpjLimpo = _documentoFormatter.unmaskText(_cnpjController.text);
 
       try {
-        // ---> MUDANÇA 5: Verificação de código duplicado agora é segura.
         final query = await db.collection('parceiros')
             .where('empresaId', isEqualTo: _empresaId)
             .where('codigo', isEqualTo: codigo)
@@ -111,7 +115,6 @@ class _TelaCadastroParceiroState extends State<TelaCadastroParceiro> {
         }
 
         final dadosParceiro = {
-          // ---> MUDANÇA 6: "Carimbamos" o parceiro com o empresaId.
           'empresaId': _empresaId,
           'codigo': codigo,
           'nome': _nomeController.text.trim(),

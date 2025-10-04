@@ -43,3 +43,9 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# Pasta de scripts de migração e chaves de segurança
+/migracao
+
+# Arquivos de cache e build do Firebase
+/.firebase/
