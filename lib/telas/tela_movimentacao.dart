@@ -1,9 +1,9 @@
-// CÓDIGO REALMENTE COMPLETO E CORRIGIDO - TELA DE MOVIMENTAÇÃO
+// CÓDIGO 100% COMPLETO E CORRIGIDO - TELA DE MOVIMENTAÇÃO
 
 import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:estocando/telas/tela_cadastro_parceiro.dart';
-import 'package:firebase_auth/firebase_auth.dart'; // ---> MUDANÇA 1: Importamos para pegar o usuário logado.
+import 'package:firebase_auth/firebase_auth.dart'; // ---> MUDANÇA 1: Importamos para pegar o usuário logado (já estava ok).
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
@@ -58,6 +58,7 @@ class _TelaMovimentacaoState extends State<TelaMovimentacao> {
   String? _subtipoSelecionado;
 
   // ---> MUDANÇA 2: Criamos uma variável para guardar o ID da empresa.
+  // Esta variável vai "segurar" o Id da empresa para usarmos mais tarde.
   String? _empresaId;
 
   List<QueryDocumentSnapshot> _listaDeProdutos = [];
@@ -128,7 +129,7 @@ class _TelaMovimentacaoState extends State<TelaMovimentacao> {
     });
   }
 
-  // ---> MUDANÇA 3: A função de carregar dados agora filtra pela empresa.
+  // ---> MUDANÇA 3: A função de carregar dados agora busca o 'empresaId' PRIMEIRO e depois filtra as listas.
   Future<void> _carregarDadosIniciais() async {
     try {
       final user = FirebaseAuth.instance.currentUser;
@@ -136,25 +137,31 @@ class _TelaMovimentacaoState extends State<TelaMovimentacao> {
         throw Exception('Usuário não autenticado.');
       }
 
-      // Primeiro, buscamos o empresaId do usuário logado na coleção 'usuarios'.
+      // 1. Buscamos o documento do usuário na coleção 'usuarios'.
       final userDoc = await FirebaseFirestore.instance.collection('usuarios').doc(user.uid).get();
       if (!userDoc.exists || (userDoc.data() as Map<String, dynamic>)['empresaId'] == null) {
         throw Exception('ID da empresa não encontrado para este usuário.');
       }
       final empresaId = (userDoc.data() as Map<String, dynamic>)['empresaId'];
 
-      // Guardamos o ID da empresa para usar mais tarde
-      _empresaId = empresaId;
+      // 2. Guardamos o ID da empresa na nossa variável de estado.
+      // A partir daqui, a tela inteira sabe a qual empresa o usuário pertence.
+      if (mounted) {
+        setState(() {
+          _empresaId = empresaId;
+        });
+      }
 
       final db = FirebaseFirestore.instance;
-      // Agora, as buscas por produtos e parceiros são filtradas com .where()
+      // 3. AGORA, as buscas por produtos e parceiros são filtradas pelo 'empresaId'.
+      // Isso é mais seguro e profissional!
       final produtosFuture = db.collection('produtos')
-          .where('empresaId', isEqualTo: _empresaId)
+          .where('empresaId', isEqualTo: _empresaId) // <-- Filtro de segurança
           .where('ativo', isEqualTo: true)
           .orderBy('nome').get();
 
       final parceirosFuture = db.collection('parceiros')
-          .where('empresaId', isEqualTo: _empresaId)
+          .where('empresaId', isEqualTo: _empresaId) // <-- Filtro de segurança
           .orderBy('nome').get();
 
       final results = await Future.wait([produtosFuture, parceirosFuture]);
@@ -181,10 +188,14 @@ class _TelaMovimentacaoState extends State<TelaMovimentacao> {
     });
   }
 
+  // CÓDIGO COM OS "ESPIÕES" (PRINTS) PARA DEBUG
   void _salvarMovimentacao() async {
     if (_formKey.currentState!.validate()) {
+      print(">>>> PASSO 1: Formulário validado com sucesso. Botão Salvar pressionado.");
+
       if (_produtoDocSelecionado == null) {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Erro: Selecione um produto válido da lista.'), backgroundColor: Colors.red));
+        print(">>>> ERRO: Produto não selecionado da lista.");
         return;
       }
       setState(() { _isSalvando = true; });
@@ -195,12 +206,17 @@ class _TelaMovimentacaoState extends State<TelaMovimentacao> {
       final double valorDaCompra = double.tryParse(_valorCompraController.text.replaceAll(RegExp(r'[^0-9,]'), '').replaceAll(',', '.')) ?? 0.0;
 
       try {
+        print(">>>> PASSO 2: Tentando iniciar a transação com o banco de dados...");
         await db.runTransaction((transaction) async {
+          print(">>>> PASSO 3: Transação iniciada. Lendo o documento do produto...");
           final produtoSnapshot = await transaction.get(produtoRef);
+
           if (!produtoSnapshot.exists) { throw Exception("Produto não encontrado!"); }
+          print(">>>> PASSO 4: Documento do produto lido com sucesso.");
           final dadosProduto = produtoSnapshot.data() as Map<String, dynamic>;
 
           if (dadosProduto['empresaId'] != _empresaId) {
+            print(">>>> ERRO DE SEGURANÇA: ID da empresa do produto (${dadosProduto['empresaId']}) é diferente do ID da empresa do usuário (${_empresaId}).");
             throw Exception('Este produto não pertence à sua empresa.');
           }
 
@@ -222,12 +238,13 @@ class _TelaMovimentacaoState extends State<TelaMovimentacao> {
               updateData['valor'] = valorDaCompra;
             }
           }
+
+          print(">>>> PASSO 5: Lógica de estoque calculada. Criando o objeto da nova movimentação...");
           updateData['quantidadeAtual'] = novoEstoque;
           transaction.update(produtoRef, updateData);
           final dadosParceiro = _parceiroDocSelecionado?.data() as Map<String, dynamic>?;
           final tipoParceiro = dadosParceiro != null ? TipoParceiro.values.byName(dadosParceiro['tipo']) : null;
 
-          // ---> MUDANÇA 4: A CORREÇÃO DO ERRO! Adicionamos o empresaId aqui.
           final novaMovimentacao = Movimentacao(
             empresaId: _empresaId!,
             produtoId: _produtoDocSelecionado!.id,
@@ -249,13 +266,18 @@ class _TelaMovimentacaoState extends State<TelaMovimentacao> {
             centroDeCusto: _centroDeCustoController.text.trim().isNotEmpty ? _centroDeCustoController.text.trim() : null,
           );
           final movimentacaoRef = db.collection('movimentacoes').doc();
+
+          print(">>>> PASSO 6: TUDO CERTO! Salvando a movimentação no banco de dados...");
           transaction.set(movimentacaoRef, novaMovimentacao.toJson());
         });
         if (mounted) {
+          print(">>>> PASSO 7: SUCESSO! Transação concluída.");
           ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Movimentação salva com sucesso!'), backgroundColor: Colors.green));
           Navigator.of(context).pop();
         }
       } catch (e) {
+        print("!!!! ERRO CAPTURADO PELA REDE DE SEGURANÇA !!!!");
+        print(e.toString());
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Erro: ${e.toString().replaceAll("Exception: ", "")}'), backgroundColor: Colors.red));
         }
@@ -264,7 +286,6 @@ class _TelaMovimentacaoState extends State<TelaMovimentacao> {
       }
     }
   }
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -394,7 +415,6 @@ class _TelaMovimentacaoState extends State<TelaMovimentacao> {
     return Autocomplete<QueryDocumentSnapshot>(
       displayStringForOption: (option) => (option.data() as Map<String, dynamic>)['nome'] ?? '',
       fieldViewBuilder: (context, textEditingController, focusNode, onFieldSubmitted) {
-        // Corrigido para usar o controller do parceiro
         _parceiroAutocompleteController.text = textEditingController.text;
         return TextFormField(
           controller: textEditingController,
