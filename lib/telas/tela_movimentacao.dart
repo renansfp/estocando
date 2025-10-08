@@ -1,9 +1,9 @@
-// CÓDIGO 100% COMPLETO E CORRIGIDO - TELA DE MOVIMENTAÇÃO
+// CÓDIGO 100% COMPLETO COM AS 4 MELHORIAS IMPLEMENTADAS
 
 import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:estocando/telas/tela_cadastro_parceiro.dart';
-import 'package:firebase_auth/firebase_auth.dart'; // ---> MUDANÇA 1: Importamos para pegar o usuário logado (já estava ok).
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
@@ -52,13 +52,14 @@ class TelaMovimentacao extends StatefulWidget {
 class _TelaMovimentacaoState extends State<TelaMovimentacao> {
   final _formKey = GlobalKey<FormState>();
 
+  // ---> MELHORIA 4: Variável estática para guardar o último lançamento ("memória").
+  // Usamos 'static' para que a memória persista mesmo se a tela for fechada e aberta novamente.
+  static Movimentacao? _ultimoLancamento;
+
   QueryDocumentSnapshot? _produtoDocSelecionado;
   QueryDocumentSnapshot? _parceiroDocSelecionado;
   late TipoMovimentacao _tipoMovimentacao;
   String? _subtipoSelecionado;
-
-  // ---> MUDANÇA 2: Criamos uma variável para guardar o ID da empresa.
-  // Esta variável vai "segurar" o Id da empresa para usarmos mais tarde.
   String? _empresaId;
 
   List<QueryDocumentSnapshot> _listaDeProdutos = [];
@@ -67,7 +68,8 @@ class _TelaMovimentacaoState extends State<TelaMovimentacao> {
   bool _isSalvando = false;
 
   final List<String> _subtiposEntrada = const ['COMPRA', 'Devolução', 'Acerto de estoque'];
-  final List<String> _subtiposSaida = const ['Venda', 'OS', 'Itau', 'Colaborador'];
+  // ---> MELHORIA 2: Alteramos a lista de subtipos de saída para incluir Venda (NF) e Venda (Pedido).
+  final List<String> _subtiposSaida = const ['Venda (NF)', 'Venda (Pedido)', 'OS', 'Itau', 'Colaborador'];
 
   final _produtoAutocompleteController = TextEditingController();
   final _parceiroAutocompleteController = TextEditingController();
@@ -80,6 +82,9 @@ class _TelaMovimentacaoState extends State<TelaMovimentacao> {
   final _agenciaController = TextEditingController();
   final _colaboradorController = TextEditingController();
   final _centroDeCustoController = TextEditingController();
+  // ---> MELHORIA 2: Novo controller para o número do pedido.
+  final _numeroPedidoController = TextEditingController();
+
 
   @override
   void initState() {
@@ -109,6 +114,8 @@ class _TelaMovimentacaoState extends State<TelaMovimentacao> {
     _agenciaController.dispose();
     _colaboradorController.dispose();
     _centroDeCustoController.dispose();
+    // ---> MELHORIA 2: Adicionamos o novo controller ao dispose para liberar a memória.
+    _numeroPedidoController.dispose();
     super.dispose();
   }
 
@@ -118,10 +125,8 @@ class _TelaMovimentacaoState extends State<TelaMovimentacao> {
       if (produtoDoc != null) {
         final data = produtoDoc.data() as Map<String, dynamic>;
         _produtoAutocompleteController.text = "${data['codigo']} - ${data['nome']}";
-
         double valorInicial = (data['valor'] ?? 0.0).toDouble();
         _valorCompraController.text = NumberFormat.currency(locale: 'pt_BR', symbol: 'R\$ ').format(valorInicial);
-
       } else {
         _produtoAutocompleteController.clear();
         _valorCompraController.clear();
@@ -129,40 +134,22 @@ class _TelaMovimentacaoState extends State<TelaMovimentacao> {
     });
   }
 
-  // ---> MUDANÇA 3: A função de carregar dados agora busca o 'empresaId' PRIMEIRO e depois filtra as listas.
   Future<void> _carregarDadosIniciais() async {
     try {
       final user = FirebaseAuth.instance.currentUser;
-      if (user == null) {
-        throw Exception('Usuário não autenticado.');
-      }
+      if (user == null) throw Exception('Usuário não autenticado.');
 
-      // 1. Buscamos o documento do usuário na coleção 'usuarios'.
       final userDoc = await FirebaseFirestore.instance.collection('usuarios').doc(user.uid).get();
       if (!userDoc.exists || (userDoc.data() as Map<String, dynamic>)['empresaId'] == null) {
         throw Exception('ID da empresa não encontrado para este usuário.');
       }
       final empresaId = (userDoc.data() as Map<String, dynamic>)['empresaId'];
 
-      // 2. Guardamos o ID da empresa na nossa variável de estado.
-      // A partir daqui, a tela inteira sabe a qual empresa o usuário pertence.
-      if (mounted) {
-        setState(() {
-          _empresaId = empresaId;
-        });
-      }
+      if (mounted) setState(() { _empresaId = empresaId; });
 
       final db = FirebaseFirestore.instance;
-      // 3. AGORA, as buscas por produtos e parceiros são filtradas pelo 'empresaId'.
-      // Isso é mais seguro e profissional!
-      final produtosFuture = db.collection('produtos')
-          .where('empresaId', isEqualTo: _empresaId) // <-- Filtro de segurança
-          .where('ativo', isEqualTo: true)
-          .orderBy('nome').get();
-
-      final parceirosFuture = db.collection('parceiros')
-          .where('empresaId', isEqualTo: _empresaId) // <-- Filtro de segurança
-          .orderBy('nome').get();
+      final produtosFuture = db.collection('produtos').where('empresaId', isEqualTo: _empresaId).where('ativo', isEqualTo: true).orderBy('nome').get();
+      final parceirosFuture = db.collection('parceiros').where('empresaId', isEqualTo: _empresaId).orderBy('nome').get();
 
       final results = await Future.wait([produtosFuture, parceirosFuture]);
       if (mounted) {
@@ -188,14 +175,58 @@ class _TelaMovimentacaoState extends State<TelaMovimentacao> {
     });
   }
 
-  // CÓDIGO COM OS "ESPIÕES" (PRINTS) PARA DEBUG
+  // ---> MELHORIA 4: Nova função para preencher o formulário com os últimos dados guardados.
+  void _preencherComUltimosDados() {
+    if (_ultimoLancamento == null) return;
+
+    setState(() {
+      // Preenche tipo, subtipo e outros campos de texto
+      _tipoMovimentacao = _ultimoLancamento!.tipo;
+      _subtipoSelecionado = _ultimoLancamento!.subTipo;
+      _centroDeCustoController.text = _ultimoLancamento!.centroDeCusto ?? '';
+      _numeroNfController.text = _ultimoLancamento!.numeroNF ?? '';
+      _numeroOsController.text = _ultimoLancamento!.numeroOS ?? '';
+      _colaboradorController.text = _ultimoLancamento!.nomeColaborador ?? '';
+      _numeroPedidoController.text = ''; // Limpamos o pedido por enquanto
+
+      // ---> INÍCIO DA CORREÇÃO <---
+      // Pega o nome do último parceiro (cliente ou fornecedor)
+      String nomeParceiro = _ultimoLancamento!.nomeCliente ?? _ultimoLancamento!.nomeFornecedor ?? '';
+
+      if (nomeParceiro.isNotEmpty) {
+        // Tenta encontrar o parceiro completo na lista que já foi carregada na tela.
+        final parceiroEncontrado = _listaDeParceiros.cast<QueryDocumentSnapshot?>().firstWhere(
+              (doc) => (doc!.data() as Map<String, dynamic>)['nome'] == nomeParceiro,
+          orElse: () => null, // Retorna null se não encontrar na lista
+        );
+
+        if (parceiroEncontrado != null) {
+          // Se encontrou, seleciona o objeto completo e preenche o texto!
+          _parceiroDocSelecionado = parceiroEncontrado;
+          _parceiroAutocompleteController.text = nomeParceiro;
+          print("Parceiro anterior encontrado e selecionado: $nomeParceiro");
+        } else {
+          // Se não encontrou (ex: parceiro foi inativado), mantém o comportamento antigo.
+          _parceiroDocSelecionado = null;
+          _parceiroAutocompleteController.text = nomeParceiro; // Mostra o nome, mas força a re-seleção
+          print("Parceiro anterior ($nomeParceiro) não encontrado na lista atual. O usuário precisará re-selecionar.");
+        }
+      } else {
+        // Se não havia parceiro no último lançamento, limpa os campos.
+        _parceiroDocSelecionado = null;
+        _parceiroAutocompleteController.clear();
+      }
+      // ---> FIM DA CORREÇÃO <---
+    });
+
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Dados do último lançamento preenchidos!'), backgroundColor: Colors.blue));
+  }
+
+
   void _salvarMovimentacao() async {
     if (_formKey.currentState!.validate()) {
-      print(">>>> PASSO 1: Formulário validado com sucesso. Botão Salvar pressionado.");
-
       if (_produtoDocSelecionado == null) {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Erro: Selecione um produto válido da lista.'), backgroundColor: Colors.red));
-        print(">>>> ERRO: Produto não selecionado da lista.");
         return;
       }
       setState(() { _isSalvando = true; });
@@ -206,17 +237,12 @@ class _TelaMovimentacaoState extends State<TelaMovimentacao> {
       final double valorDaCompra = double.tryParse(_valorCompraController.text.replaceAll(RegExp(r'[^0-9,]'), '').replaceAll(',', '.')) ?? 0.0;
 
       try {
-        print(">>>> PASSO 2: Tentando iniciar a transação com o banco de dados...");
         await db.runTransaction((transaction) async {
-          print(">>>> PASSO 3: Transação iniciada. Lendo o documento do produto...");
           final produtoSnapshot = await transaction.get(produtoRef);
+          if (!produtoSnapshot.exists) throw Exception("Produto não encontrado!");
 
-          if (!produtoSnapshot.exists) { throw Exception("Produto não encontrado!"); }
-          print(">>>> PASSO 4: Documento do produto lido com sucesso.");
           final dadosProduto = produtoSnapshot.data() as Map<String, dynamic>;
-
           if (dadosProduto['empresaId'] != _empresaId) {
-            print(">>>> ERRO DE SEGURANÇA: ID da empresa do produto (${dadosProduto['empresaId']}) é diferente do ID da empresa do usuário (${_empresaId}).");
             throw Exception('Este produto não pertence à sua empresa.');
           }
 
@@ -238,10 +264,9 @@ class _TelaMovimentacaoState extends State<TelaMovimentacao> {
               updateData['valor'] = valorDaCompra;
             }
           }
-
-          print(">>>> PASSO 5: Lógica de estoque calculada. Criando o objeto da nova movimentação...");
           updateData['quantidadeAtual'] = novoEstoque;
           transaction.update(produtoRef, updateData);
+
           final dadosParceiro = _parceiroDocSelecionado?.data() as Map<String, dynamic>?;
           final tipoParceiro = dadosParceiro != null ? TipoParceiro.values.byName(dadosParceiro['tipo']) : null;
 
@@ -264,20 +289,23 @@ class _TelaMovimentacaoState extends State<TelaMovimentacao> {
             numeroAG: _agenciaController.text.trim().isNotEmpty ? _agenciaController.text.trim() : null,
             nomeColaborador: _colaboradorController.text.trim().isNotEmpty ? _colaboradorController.text.trim() : null,
             centroDeCusto: _centroDeCustoController.text.trim().isNotEmpty ? _centroDeCustoController.text.trim() : null,
+            // OBS: Se quiser salvar o número do pedido, adicione um campo 'numeroPedido' no seu modelo Movimentacao.
+            // numeroPedido: _numeroPedidoController.text.trim().isNotEmpty ? _numeroPedidoController.text.trim() : null,
           );
-          final movimentacaoRef = db.collection('movimentacoes').doc();
 
-          print(">>>> PASSO 6: TUDO CERTO! Salvando a movimentação no banco de dados...");
+          // ---> MELHORIA 4: Guardamos na "memória" o lançamento que foi um sucesso.
+          if(mounted) {
+            _ultimoLancamento = novaMovimentacao;
+          }
+
+          final movimentacaoRef = db.collection('movimentacoes').doc();
           transaction.set(movimentacaoRef, novaMovimentacao.toJson());
         });
         if (mounted) {
-          print(">>>> PASSO 7: SUCESSO! Transação concluída.");
           ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Movimentação salva com sucesso!'), backgroundColor: Colors.green));
           Navigator.of(context).pop();
         }
       } catch (e) {
-        print("!!!! ERRO CAPTURADO PELA REDE DE SEGURANÇA !!!!");
-        print(e.toString());
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Erro: ${e.toString().replaceAll("Exception: ", "")}'), backgroundColor: Colors.red));
         }
@@ -300,6 +328,16 @@ class _TelaMovimentacaoState extends State<TelaMovimentacao> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
+                // ---> MELHORIA 4: Botão para usar os últimos dados, que só aparece se houver algo na "memória".
+                if (_ultimoLancamento != null)
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: TextButton.icon(
+                      icon: const Icon(Icons.history, size: 16),
+                      label: const Text('Usar Últimos Dados'),
+                      onPressed: _preencherComUltimosDados,
+                    ),
+                  ),
                 _buildSelecaoProdutoAutocomplete(),
                 const SizedBox(height: 20),
                 _buildTipoMovimentacao(),
@@ -333,7 +371,6 @@ class _TelaMovimentacaoState extends State<TelaMovimentacao> {
         if (_produtoAutocompleteController.text.isNotEmpty && textEditingController.text.isEmpty) {
           textEditingController.text = _produtoAutocompleteController.text;
         }
-
         return TextFormField(
           controller: textEditingController,
           focusNode: focusNode,
@@ -359,16 +396,47 @@ class _TelaMovimentacaoState extends State<TelaMovimentacao> {
           },
         );
       },
-      optionsBuilder: (TextEditingValue textEditingValue) {
-        final query = textEditingValue.text.toLowerCase();
-        if (query.isEmpty) return const Iterable<QueryDocumentSnapshot>.empty();
-        return _listaDeProdutos.where((option) {
-          final data = option.data() as Map<String, dynamic>;
-          final nome = (data['nome'] ?? '').toLowerCase();
-          final codigo = (data['codigo'] ?? '').toLowerCase();
-          return nome.contains(query) || codigo.contains(query);
-        });
-      },
+        optionsBuilder: (TextEditingValue textEditingValue) {
+          final query = textEditingValue.text.toLowerCase();
+          if (query.isEmpty) {
+            return const Iterable<QueryDocumentSnapshot>.empty();
+          }
+
+          // 1. Filtramos como antes, mas guardamos em uma lista temporária
+          final List<QueryDocumentSnapshot> suggestions = _listaDeProdutos.where((option) {
+            final data = option.data() as Map<String, dynamic>;
+            final nome = (data['nome'] ?? '').toLowerCase();
+            final codigo = (data['codigo'] ?? '').toLowerCase();
+            return nome.startsWith(query) || codigo.startsWith(query);
+          }).toList();
+
+          // 2. Agora, vamos reordenar a lista de sugestões
+          suggestions.sort((a, b) {
+            final dataA = a.data() as Map<String, dynamic>;
+            final codigoA = (dataA['codigo'] ?? '').toLowerCase();
+            final nomeA = (dataA['nome'] ?? '').toLowerCase();
+
+            final dataB = b.data() as Map<String, dynamic>;
+            final codigoB = (dataB['codigo'] ?? '').toLowerCase();
+
+            // Critério 1: Prioridade máxima para código exato
+            final bool aIsExactCode = codigoA == query;
+            final bool bIsExactCode = codigoB == query;
+            if (aIsExactCode && !bIsExactCode) return -1; // 'a' vem primeiro
+            if (!aIsExactCode && bIsExactCode) return 1;  // 'b' vem primeiro
+
+            // Critério 2: Prioridade para qualquer correspondência no código sobre o nome
+            final bool aHasCodeMatch = codigoA.startsWith(query);
+            final bool bHasCodeMatch = codigoB.startsWith(query);
+            if (aHasCodeMatch && !bHasCodeMatch) return -1; // 'a' vem primeiro
+            if (!aHasCodeMatch && bHasCodeMatch) return 1;  // 'b' vem primeiro
+
+            // Critério 3: Se nenhum dos critérios acima desempatar, ordena por nome
+            return nomeA.compareTo(nomeA);
+          });
+
+          return suggestions;
+        },
       onSelected: (selection) {
         FocusScope.of(context).unfocus();
         _setProdutoSelecionado(selection);
@@ -393,13 +461,9 @@ class _TelaMovimentacaoState extends State<TelaMovimentacao> {
   Widget _buildCampoQuantidade() {
     return TextFormField(
       controller: _qtdController,
-      decoration: const InputDecoration(
-          labelText: 'Quantidade', border: OutlineInputBorder()),
+      decoration: const InputDecoration(labelText: 'Quantidade', border: OutlineInputBorder()),
       keyboardType: const TextInputType.numberWithOptions(decimal: true),
-      inputFormatters: [
-        FilteringTextInputFormatter.allow(RegExp(r'^\d+\,?\d{0,3}')),
-        LengthLimitingTextInputFormatter(10)
-      ],
+      inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'^\d+\,?\d{0,3}')), LengthLimitingTextInputFormatter(10)],
       validator: (t) {
         if (t == null || t.isEmpty) return 'Quantidade inválida';
         final valor = double.tryParse(t.replaceAll(',', '.')) ?? 0.0;
@@ -425,22 +489,14 @@ class _TelaMovimentacaoState extends State<TelaMovimentacao> {
             suffixIcon: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                IconButton(
-                  icon: const Icon(Icons.add_circle_outline),
-                  onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const TelaCadastroParceiro())),
-                ),
-                IconButton(
-                  icon: const Icon(Icons.clear),
-                  onPressed: () {
-                    textEditingController.clear();
-                    setState(() { _parceiroDocSelecionado = null; });
-                  },
-                ),
+                IconButton(icon: const Icon(Icons.add_circle_outline), onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const TelaCadastroParceiro()))),
+                IconButton(icon: const Icon(Icons.clear), onPressed: () { textEditingController.clear(); setState(() { _parceiroDocSelecionado = null; }); }),
               ],
             ),
           ),
           validator: (value) {
-            if (_subtipoSelecionado == 'COMPRA' || _subtipoSelecionado == 'Venda' || _subtipoSelecionado == 'OS') {
+            // ---> MELHORIA 2: Ajuste na validação para os novos subtipos de venda.
+            if (_subtipoSelecionado == 'COMPRA' || _subtipoSelecionado == 'Venda (NF)' || _subtipoSelecionado == 'Venda (Pedido)' || _subtipoSelecionado == 'OS') {
               if (value != null && value.isNotEmpty && _parceiroDocSelecionado == null) return 'Selecione um $label válido da lista.';
               if (value == null || value.isEmpty) return 'O $label é obrigatório.';
             }
@@ -500,7 +556,9 @@ class _TelaMovimentacaoState extends State<TelaMovimentacao> {
         return TextFormField(controller: _devolvidoPorController, decoration: const InputDecoration(labelText: 'Nome de quem devolveu'));
       case 'Acerto de estoque':
         return TextFormField(controller: _motivoAcertoController, decoration: const InputDecoration(labelText: 'Motivo do acerto'));
-      case 'Venda':
+
+    // ---> MELHORIA 2: Dividimos o antigo caso 'Venda' em dois novos casos.
+      case 'Venda (NF)':
         return Column(children: [
           TextFormField(controller: _numeroNfController, decoration: const InputDecoration(labelText: 'Número da NF'), keyboardType: TextInputType.number, inputFormatters: [FilteringTextInputFormatter.digitsOnly, LengthLimitingTextInputFormatter(9)]),
           const SizedBox(height: 10),
@@ -508,6 +566,16 @@ class _TelaMovimentacaoState extends State<TelaMovimentacao> {
           const SizedBox(height: 10),
           _buildCampoCentroDeCusto()
         ]);
+
+      case 'Venda (Pedido)':
+        return Column(children: [
+          TextFormField(controller: _numeroPedidoController, decoration: const InputDecoration(labelText: 'Número do Pedido'), keyboardType: TextInputType.text),
+          const SizedBox(height: 10),
+          _buildParceiroAutocomplete(TipoParceiro.cliente),
+          const SizedBox(height: 10),
+          _buildCampoCentroDeCusto()
+        ]);
+
       case 'OS':
         return Column(children: [
           TextFormField(controller: _numeroOsController, decoration: const InputDecoration(labelText: 'Número da OS'), keyboardType: TextInputType.number, inputFormatters: [FilteringTextInputFormatter.digitsOnly, LengthLimitingTextInputFormatter(7)]),
@@ -524,7 +592,12 @@ class _TelaMovimentacaoState extends State<TelaMovimentacao> {
         ]);
       case 'Colaborador':
         return Column(children: [
-          TextFormField(controller: _colaboradorController, decoration: const InputDecoration(labelText: 'Nome do Colaborador')),
+          // ---> MELHORIA 3: Adicionamos textCapitalization para forçar a caixa alta.
+          TextFormField(
+            controller: _colaboradorController,
+            decoration: const InputDecoration(labelText: 'Nome do Colaborador'),
+            textCapitalization: TextCapitalization.characters,
+          ),
           const SizedBox(height: 10),
           _buildCampoCentroDeCusto()
         ]);
