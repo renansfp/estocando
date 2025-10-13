@@ -1,7 +1,7 @@
-// CÓDIGO 100% COMPLETO E CORRIGIDO COM LÓGICA DE MULTI-EMPRESA
+// CÓDIGO 100% COMPLETO E CORRIGIDO COM A LÓGICA DE DATA ATUALIZADA
 
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_auth/firebase_auth.dart'; // ---> MUDANÇA 1: Importamos para pegar o usuário.
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
@@ -33,7 +33,6 @@ class TelaRelatorios extends StatefulWidget {
 }
 
 class _TelaRelatoriosState extends State<TelaRelatorios> {
-  // ---> MUDANÇA 2: _dadosFuture pode ser nulo inicialmente.
   Future<Map<String, QuerySnapshot>>? _dadosFuture;
   DateTime? _dataInicio;
   DateTime? _dataFim;
@@ -45,7 +44,6 @@ class _TelaRelatoriosState extends State<TelaRelatorios> {
   @override
   void initState() {
     super.initState();
-    // ---> MUDANÇA 3: A busca de dados segura agora é chamada aqui.
     _carregarDadosDoFirebase();
   }
 
@@ -55,7 +53,6 @@ class _TelaRelatoriosState extends State<TelaRelatorios> {
     super.dispose();
   }
 
-  // ---> MUDANÇA 4: A função de carregar dados foi reescrita para ser segura.
   Future<void> _carregarDadosDoFirebase() async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) {
@@ -73,7 +70,6 @@ class _TelaRelatoriosState extends State<TelaRelatorios> {
 
       final db = FirebaseFirestore.instance;
 
-      // Todas as buscas agora são filtradas pelo 'empresaId'
       final produtosFuture = db.collection('produtos').where('empresaId', isEqualTo: empresaId).get();
       final movimentacoesFuture = db.collection('movimentacoes').where('empresaId', isEqualTo: empresaId).get();
       final parceirosFuture = db.collection('parceiros').where('empresaId', isEqualTo: empresaId).get();
@@ -102,7 +98,8 @@ class _TelaRelatoriosState extends State<TelaRelatorios> {
     final movimentacoesFuturas = movimentacoes.where((doc) {
       final data = doc.data() as Map<String, dynamic>;
       try {
-        final dataMov = DateTime.parse(data['data']);
+        // ---> CORREÇÃO: Lendo o Timestamp e convertendo para DateTime
+        final dataMov = (data['data'] as Timestamp).toDate();
         return dataMov.isAfter(dataAlvoFimDoDia);
       } catch (e) { return false; }
     });
@@ -174,7 +171,8 @@ class _TelaRelatoriosState extends State<TelaRelatorios> {
     final saidas = movimentacoes.where((doc) {
       final data = doc.data() as Map<String, dynamic>;
       try {
-        final dataMov = DateTime.parse(data['data']);
+        // ---> CORREÇÃO: Lendo o Timestamp e convertendo para DateTime
+        final dataMov = (data['data'] as Timestamp).toDate();
         final dentroDoPeriodo = !dataMov.isBefore(dataInicio) && dataMov.isBefore(fimDoDia);
         return data['tipo'] == 'saida' && data['centroDeCusto'] != null && data['centroDeCusto']!.isNotEmpty && dentroDoPeriodo;
       } catch (e) { return false; }
@@ -197,7 +195,8 @@ class _TelaRelatoriosState extends State<TelaRelatorios> {
     final saidas = movimentacoes.where((doc) {
       final data = doc.data() as Map<String, dynamic>;
       try {
-        final dataMov = DateTime.parse(data['data']);
+        // ---> CORREÇÃO: Lendo o Timestamp e convertendo para DateTime
+        final dataMov = (data['data'] as Timestamp).toDate();
         return data['tipo'] == 'saida' && !dataMov.isBefore(_dataInicio!) && dataMov.isBefore(fim);
       } catch (e) { return false; }
     });
@@ -233,11 +232,11 @@ class _TelaRelatoriosState extends State<TelaRelatorios> {
     final consumoPorOS = <String, Map<String, double>>{};
     final movsFiltrados = movimentacoes.where((doc) {
       final data = doc.data() as Map<String, dynamic>;
-      return (data['subTipo'] == 'OS' || data['subTipo'] == 'Venda') && data['nomeCliente'] == nomeParceiroSelecionado;
+      return (data['subTipo'] == 'OS' || data['subTipo'] == 'Venda' || data['subTipo'] == 'Venda (NF)' || data['subTipo'] == 'Venda (Pedido)') && data['nomeCliente'] == nomeParceiroSelecionado;
     });
     for (var movDoc in movsFiltrados) {
       final movData = movDoc.data() as Map<String, dynamic>;
-      final os = movData['numeroOS'] ?? movData['numeroNF'] ?? 'Não Identificado';
+      final os = movData['numeroOS'] ?? movData['numeroNF'] ?? movData['numeroPedido'] ?? 'Não Identificado';
       final produto = movData['produtoNome'] ?? 'N/A';
       final double quantidade = (movData['quantidade'] ?? 0).toDouble();
       consumoPorOS.putIfAbsent(os, () => {});
@@ -253,7 +252,8 @@ class _TelaRelatoriosState extends State<TelaRelatorios> {
     final saidasItau = movimentacoes.where((doc) {
       final data = doc.data() as Map<String, dynamic>;
       try {
-        final dataMov = DateTime.parse(data['data']);
+        // ---> CORREÇÃO: Lendo o Timestamp e convertendo para DateTime
+        final dataMov = (data['data'] as Timestamp).toDate();
         final dentroDoPeriodo = !dataMov.isBefore(dataInicio) && dataMov.isBefore(fimDoDia);
         return data['tipo'] == 'saida' && data['subTipo'] == 'Itau' && dentroDoPeriodo;
       } catch(e) { return false; }

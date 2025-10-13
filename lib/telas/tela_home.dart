@@ -2,6 +2,8 @@
 
 import 'dart:async';
 import 'dart:io';
+// ---> ADICIONADO: Importe a nova tela que você criou no Passo 2 <---
+import 'package:estocando/telas/tela_gerenciar_movimentacoes.dart';
 import 'package:estocando/telas/tela_historico.dart';
 import 'package:estocando/models/movimentacao.dart';
 import 'package:flutter/foundation.dart';
@@ -58,7 +60,10 @@ class _TelaHomeState extends State<TelaHome> {
       if (mounted && userData.exists) {
         final data = userData.data() as Map<String, dynamic>;
         setState(() {
-          _permissaoUsuario = data['permissao'];
+          // ATENÇÃO: Verifique se o nome do campo é 'permissao' ou 'nivel' no seu Firestore
+          // No seu código da TelaRelatorios você usou 'nivel', aqui está 'permissao'.
+          // Use o que for correto para o seu banco de dados.
+          _permissaoUsuario = data['permissao']; // ou data['nivel'];
           _empresaId = data['empresaId'];
         });
       }
@@ -410,6 +415,18 @@ class _TelaHomeState extends State<TelaHome> {
               onTap: () {
                 Navigator.pop(context);
                 Navigator.push(context, MaterialPageRoute(builder: (c) => const TelaAprovacaoUsuarios()));
+              },
+            ),
+            // ---> ADICIONADO: O novo botão para abrir a tela de gerenciamento <---
+            ListTile(
+              leading: const Icon(Icons.edit_note, color: Colors.blue), // Ícone sugestivo
+              title: const Text('Gerenciar Movimentações', style: TextStyle(fontWeight: FontWeight.bold)),
+              onTap: () {
+                Navigator.pop(context); // Fecha o Drawer
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (c) => const TelaGerenciarMovimentacoes()),
+                );
               },
             ),
           ],
