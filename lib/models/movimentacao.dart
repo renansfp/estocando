@@ -1,6 +1,6 @@
 // Arquivo: lib/models/movimentacao.dart (VERSÃO FINAL E CORRIGIDA)
 
-import 'package:cloud_firestore/cloud_firestore.dart'; // ---> MUDANÇA FINAL 1: Importamos para usar o Timestamp.
+import 'package:cloud_firestore/cloud_firestore.dart';
 
 enum TipoMovimentacao {
   entrada,
@@ -29,6 +29,9 @@ class Movimentacao {
   final String? nomeColaborador;
   final String? centroDeCusto;
 
+  // ---> 1. CAMPO NOVO ADICIONADO AQUI <---
+  final String? numeroPedido;
+
   final String empresaId;
 
   Movimentacao({
@@ -49,6 +52,7 @@ class Movimentacao {
     this.numeroAG,
     this.nomeColaborador,
     this.centroDeCusto,
+    this.numeroPedido, // ---> 2. CAMPO NOVO ADICIONADO AO CONSTRUTOR <---
     required this.empresaId,
   });
 
@@ -58,7 +62,7 @@ class Movimentacao {
     'produtoCodigo': produtoCodigo,
     'tipo': tipo.name,
     'quantidade': quantidade,
-    'data': Timestamp.fromDate(data), // ---> MUDANÇA FINAL 2: Convertendo para Timestamp ao salvar.
+    'data': Timestamp.fromDate(data),
     'subTipo': subTipo,
     'valorUnitarioMovimentacao': valorUnitarioMovimentacao,
     'numeroNF': numeroNF,
@@ -70,6 +74,7 @@ class Movimentacao {
     'numeroAG': numeroAG,
     'nomeColaborador': nomeColaborador,
     'centroDeCusto': centroDeCusto,
+    'numeroPedido': numeroPedido, // ---> 3. CAMPO NOVO ADICIONADO AO JSON <---
     'empresaId': empresaId,
   };
 
@@ -80,7 +85,7 @@ class Movimentacao {
       produtoCodigo: json['produtoCodigo'] ?? 'N/A',
       tipo: TipoMovimentacao.values.byName(json['tipo']),
       quantidade: (json['quantidade'] as num).toDouble(),
-      data: (json['data'] as Timestamp).toDate(), // ---> MUDANÇA FINAL 3: Lendo o Timestamp e convertendo de volta.
+      data: (json['data'] as Timestamp).toDate(),
       subTipo: json['subTipo'],
       valorUnitarioMovimentacao:
       (json['valorUnitarioMovimentacao'] as num?)?.toDouble(),
@@ -93,6 +98,7 @@ class Movimentacao {
       numeroAG: json['numeroAG'],
       nomeColaborador: json['nomeColaborador'],
       centroDeCusto: json['centroDeCusto'],
+      numeroPedido: json['numeroPedido'], // ---> 4. CAMPO NOVO ADICIONADO AO FROMJSON <---
       empresaId: json['empresaId'] ?? '',
     );
   }

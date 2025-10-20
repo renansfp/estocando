@@ -1,4 +1,4 @@
-// CÓDIGO 100% COMPLETO E CORRIGIDO (BUGS DE 'nomeB' E 'Null' CONSERTADOS)
+// CÓDIGO 100% COMPLETO E CORRIGIDO (BLINDADO CONTRA DADOS ANTIGOS/NULOS)
 
 import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -104,20 +104,24 @@ class _TelaMovimentacaoState extends State<TelaMovimentacao> {
     super.dispose();
   }
 
+  void _setProdutoSelecionadoSemSetState(QueryDocumentSnapshot? produtoDoc) {
+    _produtoDocSelecionado = produtoDoc;
+    if (produtoDoc != null) {
+      final data = produtoDoc.data() as Map<String, dynamic>;
+      _produtoAutocompleteController.text = "${data['codigo']} - ${data['nome']}";
+      if (!_isEditing) {
+        double valorInicial = (data['valor'] ?? 0.0).toDouble();
+        _valorCompraController.text = NumberFormat.currency(locale: 'pt_BR', symbol: 'R\$ ').format(valorInicial);
+      }
+    } else {
+      _produtoAutocompleteController.clear();
+      _valorCompraController.clear();
+    }
+  }
+
   void _setProdutoSelecionado(QueryDocumentSnapshot? produtoDoc) {
     setState(() {
-      _produtoDocSelecionado = produtoDoc;
-      if (produtoDoc != null) {
-        final data = produtoDoc.data() as Map<String, dynamic>;
-        _produtoAutocompleteController.text = "${data['codigo']} - ${data['nome']}";
-        if (!_isEditing) {
-          double valorInicial = (data['valor'] ?? 0.0).toDouble();
-          _valorCompraController.text = NumberFormat.currency(locale: 'pt_BR', symbol: 'R\$ ').format(valorInicial);
-        }
-      } else {
-        _produtoAutocompleteController.clear();
-        _valorCompraController.clear();
-      }
+      _setProdutoSelecionadoSemSetState(produtoDoc);
     });
   }
 
@@ -128,17 +132,24 @@ class _TelaMovimentacaoState extends State<TelaMovimentacao> {
       final userDoc = await FirebaseFirestore.instance.collection('usuarios').doc(user.uid).get();
       if (!userDoc.exists || (userDoc.data() as Map<String, dynamic>)['empresaId'] == null) throw Exception('ID da empresa não encontrado.');
       final empresaId = (userDoc.data() as Map<String, dynamic>)['empresaId'];
-      if (mounted) setState(() { _empresaId = empresaId; });
+
       final db = FirebaseFirestore.instance;
-      final produtosFuture = db.collection('produtos').where('empresaId', isEqualTo: _empresaId).where('ativo', isEqualTo: true).orderBy('nome').get();
-      final parceirosFuture = db.collection('parceiros').where('empresaId', isEqualTo: _empresaId).orderBy('nome').get();
+      final produtosFuture = db.collection('produtos').where('empresaId', isEqualTo: empresaId).where('ativo', isEqualTo: true).orderBy('nome').get();
+      final parceirosFuture = db.collection('parceiros').where('empresaId', isEqualTo: empresaId).orderBy('nome').get();
+
       final results = await Future.wait([produtosFuture, parceirosFuture]);
+
       if (mounted) {
+        _empresaId = empresaId;
+        _listaDeProdutos = results[0].docs;
+        _listaDeParceiros = results[1].docs;
+
+        if (_isEditing) {
+          _preencherFormularioParaEdicao();
+        }
+
         setState(() {
-          _listaDeProdutos = results[0].docs;
-          _listaDeParceiros = results[1].docs;
           _carregandoDados = false;
-          if (_isEditing) _preencherFormularioParaEdicao();
         });
       }
     } catch (e) {
@@ -149,46 +160,66 @@ class _TelaMovimentacaoState extends State<TelaMovimentacao> {
     }
   }
 
+  // ---> MUDANÇA (BLINDAGEM): Adicionado 'as ...? ?? ...' para evitar erros de null
   void _preencherFormularioParaEdicao() {
     try {
       final movData = widget.movimentacaoParaEditar!.data() as Map<String, dynamic>;
+
       final produtoOriginal = _listaDeProdutos.firstWhere((p) => p.id == movData['produtoId']);
+
       final nomeParceiro = movData['nomeCliente'] ?? movData['nomeFornecedor'];
 
-      // ---> CORREÇÃO 2: A forma correta de encontrar um item que pode não existir na lista.
       QueryDocumentSnapshot? parceiroOriginal;
       if (nomeParceiro != null) {
-        // Usamos .where().firstOrNull (disponível com a extensão 'collection') ou um loop simples.
-        // Por simplicidade, um try-catch implícito aqui funciona.
         try {
           parceiroOriginal = _listaDeParceiros.firstWhere((p) => (p.data() as Map<String, dynamic>)['nome'] == nomeParceiro);
         } catch (e) {
-          parceiroOriginal = null; // Parceiro não encontrado na lista, não é um erro fatal.
+          parceiroOriginal = null;
         }
       }
 
-      setState(() {
-        _setProdutoSelecionado(produtoOriginal);
-        if (parceiroOriginal != null) {
-          _parceiroDocSelecionado = parceiroOriginal;
-          _parceiroAutocompleteController.text = nomeParceiro;
-        }
-        _tipoMovimentacao = movData['tipo'] == 'entrada' ? TipoMovimentacao.entrada : TipoMovimentacao.saida;
-        _subtipoSelecionado = movData['subTipo'];
-        _qtdController.text = (movData['quantidade'] as num).toString().replaceAll('.', ',');
-        if (movData['subTipo'] == 'COMPRA' && movData['valorUnitarioMovimentacao'] != null) {
-          _valorCompraController.text = NumberFormat.currency(locale: 'pt_BR', symbol: 'R\$ ').format(movData['valorUnitarioMovimentacao']);
-        }
-        _numeroNfController.text = movData['numeroNF'] ?? '';
-        _devolvidoPorController.text = movData['nomeDevolucao'] ?? '';
-        _motivoAcertoController.text = movData['motivoAcerto'] ?? '';
-        _numeroOsController.text = movData['numeroOS'] ?? '';
-        _agenciaController.text = movData['numeroAG'] ?? '';
-        _colaboradorController.text = movData['nomeColaborador'] ?? '';
-        _centroDeCustoController.text = movData['centroDeCusto'] ?? '';
-      });
+      _setProdutoSelecionadoSemSetState(produtoOriginal);
+
+      if (parceiroOriginal != null) {
+        _parceiroDocSelecionado = parceiroOriginal;
+        _parceiroAutocompleteController.text = nomeParceiro;
+      } else if (nomeParceiro != null) {
+        _parceiroAutocompleteController.text = nomeParceiro;
+      }
+
+      // BLINDAGEM: Se 'tipo' for nulo, assume 'saida'
+      final String tipoStr = movData['tipo'] as String? ?? 'saida';
+      _tipoMovimentacao = tipoStr == 'entrada' ? TipoMovimentacao.entrada : TipoMovimentacao.saida;
+
+      _subtipoSelecionado = movData['subTipo']; // Se for nulo, o dropdown fica com o 'hint'
+
+      // BLINDAGEM: Se 'quantidade' for nulo, assume 0
+      _qtdController.text = (movData['quantidade'] as num? ?? 0).toString().replaceAll('.', ',');
+
+      // BLINDAGEM: Verifica se 'valorUnitarioMovimentacao' existe antes de formatar
+      final valorUnitario = movData['valorUnitarioMovimentacao'];
+      if (movData['subTipo'] == 'COMPRA' && valorUnitario != null) {
+        _valorCompraController.text = NumberFormat.currency(locale: 'pt_BR', symbol: 'R\$ ').format(valorUnitario);
+      }
+
+      _numeroNfController.text = movData['numeroNF'] ?? '';
+      _devolvidoPorController.text = movData['nomeDevolucao'] ?? '';
+      _motivoAcertoController.text = movData['motivoAcerto'] ?? '';
+      _numeroOsController.text = movData['numeroOS'] ?? '';
+      _agenciaController.text = movData['numeroAG'] ?? '';
+      _colaboradorController.text = movData['nomeColaborador'] ?? '';
+      _centroDeCustoController.text = movData['centroDeCusto'] ?? '';
+
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Erro: O produto original da movimentação está inativo ou foi excluído.'), backgroundColor: Colors.red));
+      _tipoMovimentacao = TipoMovimentacao.entrada;
+      _subtipoSelecionado = null;
+      _isEditing = false;
+
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if(mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Erro: O produto original da movimentação está inativo ou foi excluído.'), backgroundColor: Colors.red));
+        }
+      });
     }
   }
 
@@ -236,6 +267,7 @@ class _TelaMovimentacaoState extends State<TelaMovimentacao> {
       }
       setState(() { _isSalvando = true; });
 
+      // ---- LÓGICA DE CRIAÇÃO (NOVA MOVIMENTAÇÃO) ----
       if (!_isEditing) {
         final db = FirebaseFirestore.instance;
         final produtoRef = db.collection('produtos').doc(_produtoDocSelecionado!.id);
@@ -262,6 +294,8 @@ class _TelaMovimentacaoState extends State<TelaMovimentacao> {
             transaction.update(produtoRef, updateData);
             final dadosParceiro = _parceiroDocSelecionado?.data() as Map<String, dynamic>?;
             final tipoParceiro = dadosParceiro != null ? TipoParceiro.values.byName(dadosParceiro['tipo']) : null;
+
+            // ---> MUDANÇA (CRIAÇÃO) <---
             final novaMovimentacao = Movimentacao(
               empresaId: _empresaId!,
               produtoId: _produtoDocSelecionado!.id,
@@ -281,6 +315,8 @@ class _TelaMovimentacaoState extends State<TelaMovimentacao> {
               numeroAG: _agenciaController.text.trim().isNotEmpty ? _agenciaController.text.trim() : null,
               nomeColaborador: _colaboradorController.text.trim().isNotEmpty ? _colaboradorController.text.trim() : null,
               centroDeCusto: _centroDeCustoController.text.trim().isNotEmpty ? _centroDeCustoController.text.trim() : null,
+              // Adicionado o campo que faltava
+              numeroPedido: _numeroPedidoController.text.trim().isNotEmpty ? _numeroPedidoController.text.trim() : null,
             );
             if (mounted) _ultimoLancamento = novaMovimentacao;
             final movimentacaoRef = db.collection('movimentacoes').doc();
@@ -295,9 +331,106 @@ class _TelaMovimentacaoState extends State<TelaMovimentacao> {
         } finally {
           if (mounted) setState(() { _isSalvando = false; });
         }
+
+        // ---- LÓGICA DE ATUALIZAÇÃO (EDIÇÃO) ----
       } else {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Lógica de atualização ainda não implementada.'), backgroundColor: Colors.orange));
-        if (mounted) setState(() { _isSalvando = false; });
+        final db = FirebaseFirestore.instance;
+        final produtoRef = db.collection('produtos').doc(_produtoDocSelecionado!.id);
+        final movOriginalRef = db.collection('movimentacoes').doc(widget.movimentacaoParaEditar!.id);
+
+        final movOriginalData = widget.movimentacaoParaEditar!.data() as Map<String, dynamic>;
+        final double qtdOriginal = (movOriginalData['quantidade'] as num? ?? 0.0).toDouble();
+        final double qtdNova = double.parse(_qtdController.text.replaceAll(',', '.'));
+        final double valorDaCompraNovo = double.tryParse(_valorCompraController.text.replaceAll(RegExp(r'[^0-9,]'), '').replaceAll(',', '.')) ?? 0.0;
+
+        final double diferenca = qtdNova - qtdOriginal;
+        final double ajusteDeEstoque = (_tipoMovimentacao == TipoMovimentacao.entrada) ? diferenca : -diferenca;
+
+        DateTime dataOriginal;
+        final dataValue = movOriginalData['data'];
+        if (dataValue is Timestamp) {
+          dataOriginal = dataValue.toDate();
+        } else {
+          dataOriginal = DateTime.now();
+        }
+
+        try {
+          await db.runTransaction((transaction) async {
+            final produtoSnapshot = await transaction.get(produtoRef);
+            if (!produtoSnapshot.exists) throw Exception("Produto não encontrado!");
+            final dadosProduto = produtoSnapshot.data() as Map<String, dynamic>;
+
+            final estoqueAtual = (dadosProduto['quantidadeAtual'] ?? 0).toDouble();
+            final double novoEstoque = estoqueAtual + ajusteDeEstoque;
+
+            if (novoEstoque < 0) {
+              throw Exception('Estoque insuficiente! Saldo atual: ${estoqueAtual.toStringAsFixed(3).replaceAll('.', ',')}. Ajuste: ${ajusteDeEstoque.toStringAsFixed(3).replaceAll('.', ',')}');
+            }
+
+            Map<String, dynamic> updateProdutoData = {'quantidadeAtual': novoEstoque};
+
+            if (_subtipoSelecionado == 'COMPRA') {
+              updateProdutoData['valor'] = valorDaCompraNovo;
+            }
+            transaction.update(produtoRef, updateProdutoData);
+
+            final dadosParceiro = _parceiroDocSelecionado?.data() as Map<String, dynamic>?;
+            final tipoParceiro = dadosParceiro != null ? TipoParceiro.values.byName(dadosParceiro['tipo']) : null;
+
+            String? nomeParceiro = _parceiroAutocompleteController.text.trim();
+            if (nomeParceiro.isEmpty) nomeParceiro = null;
+
+            // ---> MUDANÇA (EDIÇÃO) <---
+            final Movimentacao movimentacaoAtualizada = Movimentacao(
+              empresaId: _empresaId!,
+              produtoId: _produtoDocSelecionado!.id,
+              produtoCodigo: dadosProduto['codigo'],
+              produtoNome: dadosProduto['nome'],
+              tipo: _tipoMovimentacao,
+              quantidade: qtdNova,
+              data: dataOriginal,
+              subTipo: _subtipoSelecionado,
+              valorUnitarioMovimentacao: (_tipoMovimentacao == TipoMovimentacao.entrada && _subtipoSelecionado == 'COMPRA')
+                  ? valorDaCompraNovo
+                  : (movOriginalData['valorUnitarioMovimentacao'] ?? dadosProduto['valor'] ?? 0.0),
+              nomeCliente: tipoParceiro == TipoParceiro.cliente ? (dadosParceiro?['nome'] ?? nomeParceiro) : null,
+              nomeFornecedor: tipoParceiro == TipoParceiro.fornecedor ? (dadosParceiro?['nome'] ?? nomeParceiro) : null,
+              numeroNF: _numeroNfController.text.trim().isNotEmpty ? _numeroNfController.text.trim() : null,
+              numeroOS: _numeroOsController.text.trim().isNotEmpty ? _numeroOsController.text.trim() : null,
+              nomeDevolucao: _devolvidoPorController.text.trim().isNotEmpty ? _devolvidoPorController.text.trim() : null,
+              motivoAcerto: _motivoAcertoController.text.trim().isNotEmpty ? _motivoAcertoController.text.trim() : null,
+              numeroAG: _agenciaController.text.trim().isNotEmpty ? _agenciaController.text.trim() : null,
+              nomeColaborador: _colaboradorController.text.trim().isNotEmpty ? _colaboradorController.text.trim() : null,
+              centroDeCusto: _centroDeCustoController.text.trim().isNotEmpty ? _centroDeCustoController.text.trim() : null,
+              // Adicionado o campo que faltava
+              numeroPedido: _numeroPedidoController.text.trim().isNotEmpty ? _numeroPedidoController.text.trim() : null,
+            );
+
+            transaction.update(movOriginalRef, movimentacaoAtualizada.toJson());
+          });
+
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Movimentação atualizada com sucesso!'), backgroundColor: Colors.green));
+            Navigator.of(context).pop();
+          }
+        } catch (e, s) {
+          print('--- ERRO DETALHADO (WEB) ---');
+          print(e);
+          print('--- STACK TRACE ---');
+          print(s);
+
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Erro ao atualizar. Verifique o "DEBUG CONSOLE" para detalhes.'),
+                backgroundColor: Colors.red,
+                duration: Duration(seconds: 10),
+              ),
+            );
+          }
+        } finally {
+          if (mounted) setState(() { _isSalvando = false; });
+        }
       }
     }
   }
@@ -330,9 +463,18 @@ class _TelaMovimentacaoState extends State<TelaMovimentacao> {
                   child: _buildSelecaoProdutoAutocomplete(),
                 ),
                 const SizedBox(height: 20),
-                _buildTipoMovimentacao(),
-                const SizedBox(height: 20),
-                _buildSubtipoDropdown(),
+
+                AbsorbPointer(
+                  absorbing: _isEditing,
+                  child: Column(
+                    children: [
+                      _buildTipoMovimentacao(),
+                      const SizedBox(height: 20),
+                      _buildSubtipoDropdown(),
+                    ],
+                  ),
+                ),
+
                 const SizedBox(height: 10),
                 _buildCamposCondicionais(),
                 const SizedBox(height: 10),
@@ -404,14 +546,13 @@ class _TelaMovimentacaoState extends State<TelaMovimentacao> {
           final nomeA = (dataA['nome'] ?? '').toLowerCase();
           final dataB = b.data() as Map<String, dynamic>;
           final codigoB = (dataB['codigo'] ?? '').toLowerCase();
-
-          // ---> CORREÇÃO 1: Declarando e usando 'nomeB' corretamente.
           final String nomeB = (dataB['nome'] ?? '').toLowerCase();
 
           final bool aIsExactCode = codigoA == query;
           final bool bIsExactCode = codigoB == query;
           if (aIsExactCode && !bIsExactCode) return -1;
           if (!aIsExactCode && bIsExactCode) return 1;
+
           final bool aHasCodeMatch = codigoA.startsWith(query);
           final bool bHasCodeMatch = codigoB.startsWith(query);
           if (aHasCodeMatch && !bHasCodeMatch) return -1;
@@ -431,14 +572,37 @@ class _TelaMovimentacaoState extends State<TelaMovimentacao> {
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       const Text('Tipo de Movimentação:', style: TextStyle(fontSize: 16)),
       Row(children: [
-        Expanded(child: RadioListTile<TipoMovimentacao>(title: const Text('Entrada'), value: TipoMovimentacao.entrada, groupValue: _tipoMovimentacao, onChanged: (v) { if (v != null) setState(() { _tipoMovimentacao = v; _limparSelecoesDependentes(); }); },)),
-        Expanded(child: RadioListTile<TipoMovimentacao>(title: const Text('Saída'), value: TipoMovimentacao.saida, groupValue: _tipoMovimentacao, onChanged: (v) { if (v != null) setState(() { _tipoMovimentacao = v; _limparSelecoesDependentes(); }); },)),
+        Expanded(child: RadioListTile<TipoMovimentacao>(
+          title: const Text('Entrada'),
+          value: TipoMovimentacao.entrada,
+          groupValue: _tipoMovimentacao,
+          onChanged: _isEditing ? null : (v) { if (v != null) setState(() { _tipoMovimentacao = v; _limparSelecoesDependentes(); }); },
+        )),
+        Expanded(child: RadioListTile<TipoMovimentacao>(
+          title: const Text('Saída'),
+          value: TipoMovimentacao.saida,
+          groupValue: _tipoMovimentacao,
+          onChanged: _isEditing ? null : (v) { if (v != null) setState(() { _tipoMovimentacao = v; _limparSelecoesDependentes(); }); },
+        )),
       ])
     ]);
   }
 
   Widget _buildSubtipoDropdown() {
-    return DropdownButtonFormField<String>(value: _subtipoSelecionado, hint: const Text('Destino / Motivo'), isExpanded: true, items: (_tipoMovimentacao == TipoMovimentacao.entrada ? _subtiposEntrada : _subtiposSaida).map((String v) => DropdownMenuItem<String>(value: v, child: Text(v))).toList(), onChanged: (v) => setState(() => _subtipoSelecionado = v), validator: (v) => v == null ? 'Selecione uma opção' : null, decoration: const InputDecoration(border: OutlineInputBorder()));
+    return DropdownButtonFormField<String>(
+        value: _subtipoSelecionado,
+        hint: const Text('Destino / Motivo'),
+        isExpanded: true,
+        items: (_tipoMovimentacao == TipoMovimentacao.entrada ? _subtiposEntrada : _subtiposSaida)
+            .map((String v) => DropdownMenuItem<String>(value: v, child: Text(v))).toList(),
+        onChanged: _isEditing ? null : (v) => setState(() => _subtipoSelecionado = v),
+        validator: (v) => v == null ? 'Selecione uma opção' : null,
+        decoration: InputDecoration(
+          border: const OutlineInputBorder(),
+          filled: _isEditing,
+          fillColor: Colors.grey[200],
+        )
+    );
   }
 
   Widget _buildCampoQuantidade() {
@@ -459,12 +623,23 @@ class _TelaMovimentacaoState extends State<TelaMovimentacao> {
   Widget _buildParceiroAutocomplete(TipoParceiro tipo) {
     final String label = tipo == TipoParceiro.cliente ? 'Cliente' : 'Fornecedor';
     final List<QueryDocumentSnapshot> listaFiltrada = _listaDeParceiros.where((doc) => (doc.data() as Map<String, dynamic>)['tipo'] == tipo.name).toList();
+
+    String textoInicial = _parceiroAutocompleteController.text;
+
     return Autocomplete<QueryDocumentSnapshot>(
       displayStringForOption: (option) => (option.data() as Map<String, dynamic>)['nome'] ?? '',
+
+      initialValue: TextEditingValue(text: textoInicial),
+
       fieldViewBuilder: (context, textEditingController, focusNode, onFieldSubmitted) {
+        textEditingController.addListener(() {
+          _parceiroAutocompleteController.text = textEditingController.text;
+        });
+
         if (_parceiroAutocompleteController.text.isNotEmpty && textEditingController.text.isEmpty) {
           textEditingController.text = _parceiroAutocompleteController.text;
         }
+
         return TextFormField(
           controller: textEditingController,
           focusNode: focusNode,
@@ -475,12 +650,22 @@ class _TelaMovimentacaoState extends State<TelaMovimentacao> {
               mainAxisSize: MainAxisSize.min,
               children: [
                 IconButton(icon: const Icon(Icons.add_circle_outline), onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const TelaCadastroParceiro()))),
-                IconButton(icon: const Icon(Icons.clear), onPressed: () { textEditingController.clear(); setState(() { _parceiroDocSelecionado = null; _parceiroAutocompleteController.clear(); }); }),
+                IconButton(icon: const Icon(Icons.clear), onPressed: () {
+                  textEditingController.clear();
+                  setState(() {
+                    _parceiroDocSelecionado = null;
+                    _parceiroAutocompleteController.clear();
+                  });
+                }),
               ],
             ),
           ),
           validator: (value) {
             if (_subtipoSelecionado == 'COMPRA' || _subtipoSelecionado == 'Venda (NF)' || _subtipoSelecionado == 'Venda (Pedido)' || _subtipoSelecionado == 'OS') {
+              if (_isEditing && value != null && value.isNotEmpty) {
+                return null;
+              }
+
               if (value != null && value.isNotEmpty && _parceiroDocSelecionado == null) return 'Selecione um $label válido da lista.';
               if (value == null || value.isEmpty) return 'O $label é obrigatório.';
             }
@@ -501,6 +686,7 @@ class _TelaMovimentacaoState extends State<TelaMovimentacao> {
       onSelected: (selection) {
         FocusScope.of(context).unfocus();
         setState(() { _parceiroDocSelecionado = selection; });
+        _parceiroAutocompleteController.text = (selection.data() as Map<String, dynamic>)['nome'] ?? '';
       },
     );
   }

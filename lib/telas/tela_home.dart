@@ -1,10 +1,9 @@
-// VERSÃO FINAL E COMPLETA - TELA HOME (04/10/2025)
+// CÓDIGO COMPLETO - TELA HOME (v. 20/10/2025 - Com Permissões de Usuário - SEM ABREVIAÇÕES)
 
 import 'dart:async';
 import 'dart:io';
-// ---> ADICIONADO: Importe a nova tela que você criou no Passo 2 <---
 import 'package:estocando/telas/tela_gerenciar_movimentacoes.dart';
-import 'package:estocando/telas/tela_historico.dart';
+import 'package:estocando/telas/tela_historico.dart'; // Verifique se TelaRelatorios está aqui
 import 'package:estocando/models/movimentacao.dart';
 import 'package:flutter/foundation.dart';
 import 'package:universal_html/html.dart' as html;
@@ -22,7 +21,8 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter_speed_dial/flutter_speed_dial.dart';
 import 'package:intl/intl.dart';
 import 'tela_cadastro_produto.dart';
-
+import 'package:estocando/telas/tela_criar_requisicao.dart';
+import 'package:estocando/telas/tela_requisicoes_pendentes.dart';
 import 'package:excel/excel.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
@@ -41,7 +41,7 @@ class _TelaHomeState extends State<TelaHome> {
   FiltroProdutos _filtroAtual = FiltroProdutos.ativos;
   Timer? _debounce;
 
-  String? _permissaoUsuario;
+  String? _permissaoUsuario; // 'admin', 'almoxarife', 'producao'
   String? _empresaId;
   bool _carregandoDadosIniciais = true;
 
@@ -60,13 +60,21 @@ class _TelaHomeState extends State<TelaHome> {
       if (mounted && userData.exists) {
         final data = userData.data() as Map<String, dynamic>;
         setState(() {
-          // ATENÇÃO: Verifique se o nome do campo é 'permissao' ou 'nivel' no seu Firestore
-          // No seu código da TelaRelatorios você usou 'nivel', aqui está 'permissao'.
-          // Use o que for correto para o seu banco de dados.
-          _permissaoUsuario = data['permissao']; // ou data['nivel'];
+          _permissaoUsuario = data['permissao'];
           _empresaId = data['empresaId'];
+          if (_permissaoUsuario == null || !['admin', 'almoxarife', 'producao'].contains(_permissaoUsuario)) {
+            print("AVISO: Permissão de usuário inválida ou nula ('$_permissaoUsuario'), definindo como 'producao'.");
+            _permissaoUsuario = 'producao';
+          }
+          print("Permissão do usuário carregada: $_permissaoUsuario");
         });
+      } else {
+        print("AVISO: Documento do usuário não encontrado no Firestore.");
+        if (mounted) setState(() => _permissaoUsuario = 'producao');
       }
+    } else {
+      print("AVISO: Nenhum usuário logado.");
+      if (mounted) setState(() => _permissaoUsuario = 'producao');
     }
     if (mounted) {
       setState(() {
@@ -95,76 +103,42 @@ class _TelaHomeState extends State<TelaHome> {
   Future<void> _exportarProdutosParaExcel() async {
     try {
       if (_empresaId == null) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('Erro: ID da empresa não encontrado. Tente novamente.'),
-          backgroundColor: Colors.red,
-        ));
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar( content: Text('Erro: ID da empresa não encontrado. Tente novamente.'), backgroundColor: Colors.red, ));
         return;
       }
-
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-        content: Text('Gerando relatório... Por favor, aguarde.'),
-        backgroundColor: Colors.blue,
-      ));
-
-      final querySnapshot = await FirebaseFirestore.instance
-          .collection('produtos')
-          .where('empresaId', isEqualTo: _empresaId)
-          .orderBy('nome')
-          .get();
-
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar( content: Text('Gerando relatório... Por favor, aguarde.'), backgroundColor: Colors.blue, ));
+      final querySnapshot = await FirebaseFirestore.instance .collection('produtos') .where('empresaId', isEqualTo: _empresaId) .orderBy('nome') .get();
       final produtos = querySnapshot.docs;
-
       var excel = Excel.createExcel();
       Sheet sheetObject = excel['Produtos'];
-
       List<String> headers = ['Código', 'Nome', 'Quantidade Atual', 'Estoque Mínimo', 'Estoque Máximo', 'Valor Unitário', 'Número SC', 'Ativo'];
       sheetObject.appendRow(headers.map((header) => TextCellValue(header)).toList());
-
       for (var doc in produtos) {
         final data = doc.data();
-        List<CellValue> row = [
-          TextCellValue(data['codigo'] ?? ''),
-          TextCellValue(data['nome'] ?? ''),
-          DoubleCellValue((data['quantidadeAtual'] ?? 0.0).toDouble()),
-          DoubleCellValue((data['estoqueMinimo'] ?? 0.0).toDouble()),
-          DoubleCellValue((data['estoqueMaximo'] ?? 0.0).toDouble()),
-          DoubleCellValue((data['valor'] ?? 0.0).toDouble()),
-          TextCellValue(data['numeroSC'] ?? ''),
-          TextCellValue(data['ativo'] == true ? 'Sim' : 'Não'),
-        ];
+        List<CellValue> row = [ TextCellValue(data['codigo'] ?? ''), TextCellValue(data['nome'] ?? ''), DoubleCellValue((data['quantidadeAtual'] ?? 0.0).toDouble()), DoubleCellValue((data['estoqueMinimo'] ?? 0.0).toDouble()), DoubleCellValue((data['estoqueMaximo'] ?? 0.0).toDouble()), DoubleCellValue((data['valor'] ?? 0.0).toDouble()), TextCellValue(data['numeroSC'] ?? ''), TextCellValue(data['ativo'] == true ? 'Sim' : 'Não'), ];
         sheetObject.appendRow(row);
       }
-
       final timestamp = DateFormat('yyyyMMdd_HHmmss').format(DateTime.now());
       final fileName = 'Estocando_Produtos_$timestamp.xlsx';
       var fileBytes = excel.save();
-
       if (kIsWeb) {
         if (fileBytes != null) {
           final blob = html.Blob([fileBytes], 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
           final url = html.Url.createObjectUrlFromBlob(blob);
-          final anchor = html.AnchorElement(href: url)
-            ..setAttribute("download", fileName)
-            ..click();
+          final anchor = html.AnchorElement(href: url) ..setAttribute("download", fileName) ..click();
           html.Url.revokeObjectUrl(url);
         }
       } else {
         if (fileBytes != null) {
           final directory = await getTemporaryDirectory();
           final filePath = '${directory.path}/$fileName';
-          File(filePath)
-            ..createSync(recursive: true)
-            ..writeAsBytesSync(fileBytes);
+          File(filePath) ..createSync(recursive: true) ..writeAsBytesSync(fileBytes);
           await Share.shareXFiles([XFile(filePath)], text: 'Relatório de Produtos - Estocando');
         }
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text('Erro ao exportar: $e'),
-          backgroundColor: Colors.red,
-        ));
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar( content: Text('Erro ao exportar: $e'), backgroundColor: Colors.red, ));
       }
     }
   }
@@ -196,8 +170,12 @@ class _TelaHomeState extends State<TelaHome> {
 
     return Scaffold(
       appBar: _buildAppBar(),
-      drawer: _carregandoDadosIniciais ? const Drawer(child: Center(child: CircularProgressIndicator())) : _buildDrawer(context),
-      floatingActionButton: _buildSpeedDial(context),
+      drawer: _carregandoDadosIniciais || _permissaoUsuario == null
+          ? const Drawer(child: Center(child: CircularProgressIndicator()))
+          : _buildDrawer(context, _permissaoUsuario!),
+      floatingActionButton: _carregandoDadosIniciais || _permissaoUsuario == null
+          ? null
+          : _buildSpeedDial(context, _permissaoUsuario!),
       body: _carregandoDadosIniciais
           ? const Center(child: CircularProgressIndicator())
           : StreamBuilder<QuerySnapshot>(
@@ -234,12 +212,7 @@ class _TelaHomeState extends State<TelaHome> {
               final codigoA = (dataA['codigo'] ?? '').toLowerCase();
               final nomeB = (dataB['nome'] ?? '').toLowerCase();
               final codigoB = (dataB['codigo'] ?? '').toLowerCase();
-              int getMatchScore(String nome, String codigo) {
-                if (codigo == queryBusca) return 1;
-                if (codigo.startsWith(queryBusca)) return 2;
-                if (nome.startsWith(queryBusca)) return 3;
-                return 4;
-              }
+              int getMatchScore(String nome, String codigo) { if (codigo == queryBusca) return 1; if (codigo.startsWith(queryBusca)) return 2; if (nome.startsWith(queryBusca)) return 3; return 4; }
               final scoreA = getMatchScore(nomeA, codigoA);
               final scoreB = getMatchScore(nomeB, codigoB);
               return scoreA != scoreB ? scoreA.compareTo(scoreB) : nomeA.compareTo(nomeB);
@@ -254,11 +227,7 @@ class _TelaHomeState extends State<TelaHome> {
               final double quantidadeB = (dataB['quantidadeAtual'] ?? 0.0).toDouble();
               final double estoqueMinimoB = (dataB['estoqueMinimo'] ?? 0.0).toDouble();
               final String nomeB = dataB['nome'] ?? '';
-              int getPrioridade(double qtd, double min) {
-                if (qtd <= 0) return 1;
-                if (qtd <= min && min > 0) return 2;
-                return 3;
-              }
+              int getPrioridade(double qtd, double min) { if (qtd <= 0) return 1; if (qtd <= min && min > 0) return 2; return 3; }
               final prioridadeA = getPrioridade(quantidadeA, estoqueMinimoA);
               final prioridadeB = getPrioridade(quantidadeB, estoqueMinimoB);
               return prioridadeA != prioridadeB ? prioridadeA.compareTo(prioridadeB) : nomeA.toLowerCase().compareTo(nomeB.toLowerCase());
@@ -274,7 +243,7 @@ class _TelaHomeState extends State<TelaHome> {
           return ListView.builder(
             padding: const EdgeInsets.only(bottom: 80.0),
             itemCount: produtos.length,
-            itemBuilder: (context, index) => _buildCardProduto(context, produtos[index]),
+            itemBuilder: (context, index) => _buildCardProduto(context, produtos[index], _permissaoUsuario!),
           );
         },
       ),
@@ -319,8 +288,10 @@ class _TelaHomeState extends State<TelaHome> {
     }
   }
 
-  Drawer _buildDrawer(BuildContext context) {
+  Drawer _buildDrawer(BuildContext context, String permissao) {
     final String? currentUserEmail = FirebaseAuth.instance.currentUser?.email;
+    final bool isAdmin = permissao == 'admin';
+    final bool isAlmoxarife = permissao == 'almoxarife';
 
     return Drawer(
       child: ListView(
@@ -337,33 +308,49 @@ class _TelaHomeState extends State<TelaHome> {
               ],
             ),
           ),
-          ListTile(
-              title: const Text('Parceiros'),
-              leading: const Icon(Icons.people),
-              onTap: () {
-                Navigator.pop(context);
-                Navigator.push(context, MaterialPageRoute(builder: (c) => const TelaParceiros()));
-              }
-          ),
-          ListTile(
-              title: const Text('Extrato de Movimentações'),
-              leading: const Icon(Icons.receipt_long),
-              onTap: () {
-                Navigator.pop(context);
-                Navigator.push(context, MaterialPageRoute(builder: (c) => const TelaExtratoMovimentacoes()));
-              }
-          ),
-          ListTile(
-            title: const Text('Dashboard de Relatórios'),
-            leading: const Icon(Icons.dashboard),
-            onTap: () {
-              Navigator.pop(context);
-              Navigator.push(context, MaterialPageRoute(builder: (c) => const TelaRelatorios()));
-            },
-          ),
-          const Divider(),
 
-          if (_permissaoUsuario == 'admin') ...[
+          // Itens visíveis para Admin e Almoxarife
+          if (isAdmin || isAlmoxarife) ...[
+            ListTile(
+                title: const Text('Parceiros'),
+                leading: const Icon(Icons.people),
+                onTap: () {
+                  Navigator.pop(context);
+                  Navigator.push(context, MaterialPageRoute(builder: (c) => const TelaParceiros()));
+                }
+            ),
+            ListTile(
+                title: const Text('Extrato de Movimentações'),
+                leading: const Icon(Icons.receipt_long),
+                onTap: () {
+                  Navigator.pop(context);
+                  Navigator.push(context, MaterialPageRoute(builder: (c) => const TelaExtratoMovimentacoes()));
+                }
+            ),
+            ListTile(
+              title: const Text('Dashboard de Relatórios'),
+              leading: const Icon(Icons.dashboard),
+              onTap: () {
+                Navigator.pop(context);
+                Navigator.push(context, MaterialPageRoute(builder: (c) => const TelaRelatorios())); // Confirme o nome da classe
+              },
+            ),
+          ],
+
+          // Exportar Excel (Ajuste a permissão se necessário, aqui está para Admin/Almoxarife)
+          if (isAdmin || isAlmoxarife)
+            ListTile(
+              title: const Text('Exportar Produtos (Excel)'),
+              leading: const Icon(Icons.download_for_offline),
+              onTap: () {
+                Navigator.pop(context);
+                _exportarProdutosParaExcel();
+              },
+            ),
+
+          // Itens de Importação (SOMENTE ADMIN)
+          if (isAdmin) ...[
+            const Divider(),
             const Padding(
                 padding: EdgeInsets.symmetric(horizontal: 16.0),
                 child: Text('Importação', style: TextStyle(color: Colors.grey))
@@ -394,49 +381,52 @@ class _TelaHomeState extends State<TelaHome> {
             ),
           ],
 
-          ListTile(
-            title: const Text('Exportar Produtos (Excel)'),
-            leading: const Icon(Icons.download_for_offline),
-            onTap: () {
-              Navigator.pop(context);
-              _exportarProdutosParaExcel();
-            },
-          ),
-
-          if (_permissaoUsuario == 'admin') ...[
+          // Itens de Administração (Alguns para Admin, outros para Admin/Almoxarife)
+          if (isAdmin || isAlmoxarife) ...[
             const Divider(),
             const Padding(
               padding: EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
               child: Text('Administração', style: TextStyle(color: Colors.blue, fontWeight: FontWeight.bold)),
             ),
+            // Somente Admin
+            if (isAdmin)
+              ListTile(
+                leading: const Icon(Icons.admin_panel_settings, color: Colors.blue),
+                title: const Text('Aprovar Usuários', style: TextStyle(fontWeight: FontWeight.bold)),
+                onTap: () {
+                  Navigator.pop(context);
+                  Navigator.push(context, MaterialPageRoute(builder: (c) => const TelaAprovacaoUsuarios()));
+                },
+              ),
+            // Admin e Almoxarife
             ListTile(
-              leading: const Icon(Icons.admin_panel_settings, color: Colors.blue),
-              title: const Text('Aprovar Usuários', style: TextStyle(fontWeight: FontWeight.bold)),
-              onTap: () {
-                Navigator.pop(context);
-                Navigator.push(context, MaterialPageRoute(builder: (c) => const TelaAprovacaoUsuarios()));
-              },
-            ),
-            // ---> ADICIONADO: O novo botão para abrir a tela de gerenciamento <---
-            ListTile(
-              leading: const Icon(Icons.edit_note, color: Colors.blue), // Ícone sugestivo
+              leading: const Icon(Icons.edit_note, color: Colors.blue),
               title: const Text('Gerenciar Movimentações', style: TextStyle(fontWeight: FontWeight.bold)),
               onTap: () {
-                Navigator.pop(context); // Fecha o Drawer
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (c) => const TelaGerenciarMovimentacoes()),
-                );
+                Navigator.pop(context);
+                Navigator.push(context, MaterialPageRoute(builder: (c) => const TelaGerenciarMovimentacoes()));
+              },
+            ),
+            // Admin e Almoxarife
+            ListTile(
+              leading: const Icon(Icons.shopping_basket_outlined, color: Colors.blue),
+              title: const Text('Atender Requisições', style: TextStyle(fontWeight: FontWeight.bold)),
+              onTap: () {
+                Navigator.pop(context);
+                Navigator.push(context, MaterialPageRoute(builder: (c) => const TelaRequisicoesPendentes()));
               },
             ),
           ],
 
+          // Sair (Visível para TODOS)
           const Divider(),
           ListTile(
             title: const Text('Sair'),
             leading: const Icon(Icons.logout),
             onTap: () async {
+              Navigator.pop(context); // Fecha o drawer ANTES de deslogar
               await FirebaseAuth.instance.signOut();
+              // A navegação para a tela de login geralmente é feita pelo StreamBuilder principal do app
             },
           ),
         ],
@@ -444,7 +434,7 @@ class _TelaHomeState extends State<TelaHome> {
     );
   }
 
-  Widget _buildCardProduto(BuildContext context, QueryDocumentSnapshot produtoDoc) {
+  Widget _buildCardProduto(BuildContext context, QueryDocumentSnapshot produtoDoc, String permissao) {
     final data = produtoDoc.data() as Map<String, dynamic>;
     final double quantidade = (data['quantidadeAtual'] ?? 0.0).toDouble();
     final double estoqueMinimo = (data['estoqueMinimo'] ?? 0.0).toDouble();
@@ -455,13 +445,10 @@ class _TelaHomeState extends State<TelaHome> {
     String statusText = 'Estoque OK';
     Color textColor = Colors.white;
 
-    if (quantidade <= 0) {
-      statusColor = Colors.red.shade700;
-      statusText = 'Estoque Zerado';
-    } else if (quantidade <= estoqueMinimo && estoqueMinimo > 0) {
-      statusColor = Colors.orange.shade800;
-      statusText = 'Abaixo do Mínimo';
-    }
+    if (quantidade <= 0) { statusColor = Colors.red.shade700; statusText = 'Estoque Zerado'; }
+    else if (quantidade <= estoqueMinimo && estoqueMinimo > 0) { statusColor = Colors.orange.shade800; statusText = 'Abaixo do Mínimo'; }
+
+    final bool podeAlterar = permissao == 'admin' || permissao == 'almoxarife';
 
     return Card(
       elevation: 2,
@@ -505,7 +492,7 @@ class _TelaHomeState extends State<TelaHome> {
                 const SizedBox(width: 8),
               ],
             ),
-            trailing: PopupMenuButton<AcoesProduto>(
+            trailing: podeAlterar ? PopupMenuButton<AcoesProduto>(
               icon: const Icon(Icons.more_vert),
               tooltip: 'Mais Opções',
               onSelected: (AcoesProduto acao) {
@@ -526,29 +513,30 @@ class _TelaHomeState extends State<TelaHome> {
                 const PopupMenuItem(value: AcoesProduto.solicitarCompra, child: Text('Solicitar Compra (SC)')),
                 const PopupMenuItem(value: AcoesProduto.excluir, child: Text('Excluir')),
               ],
-            ),
+            ) : null,
           ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(8, 0, 8, 4),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.end,
-              children: [
-                _buildActionButton(context, 'ENTRADA', Icons.add_circle_outline, Colors.green,
-                        () => Navigator.push(context, MaterialPageRoute(builder: (c) => TelaMovimentacao(
-                      produtoPreSelecionado: produtoDoc,
-                      tipoMovimentacaoInicial: TipoMovimentacao.entrada,
-                    )))
-                ),
-                const SizedBox(width: 8),
-                _buildActionButton(context, 'SAÍDA', Icons.remove_circle_outline, Colors.red,
-                        () => Navigator.push(context, MaterialPageRoute(builder: (c) => TelaMovimentacao(
-                      produtoPreSelecionado: produtoDoc,
-                      tipoMovimentacaoInicial: TipoMovimentacao.saida,
-                    )))
-                ),
-              ],
+          if (podeAlterar)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(8, 0, 8, 4),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  _buildActionButton(context, 'ENTRADA', Icons.add_circle_outline, Colors.green,
+                          () => Navigator.push(context, MaterialPageRoute(builder: (c) => TelaMovimentacao(
+                        produtoPreSelecionado: produtoDoc,
+                        tipoMovimentacaoInicial: TipoMovimentacao.entrada,
+                      )))
+                  ),
+                  const SizedBox(width: 8),
+                  _buildActionButton(context, 'SAÍDA', Icons.remove_circle_outline, Colors.red,
+                          () => Navigator.push(context, MaterialPageRoute(builder: (c) => TelaMovimentacao(
+                        produtoPreSelecionado: produtoDoc,
+                        tipoMovimentacaoInicial: TipoMovimentacao.saida,
+                      )))
+                  ),
+                ],
+              ),
             ),
-          ),
         ],
       ),
     );
@@ -566,78 +554,45 @@ class _TelaHomeState extends State<TelaHome> {
     );
   }
 
-  SpeedDial _buildSpeedDial(BuildContext context) {
+  SpeedDial _buildSpeedDial(BuildContext context, String permissao) {
+    List<SpeedDialChild> children = [];
+
+    if (permissao == 'producao' || permissao == 'admin') {
+      children.add(
+          SpeedDialChild( child: const Icon(Icons.shopping_basket, color: Colors.white), label: 'Nova Requisição', backgroundColor: Colors.blueAccent, onTap: () => Navigator.push(context, MaterialPageRoute(builder: (c) => const TelaCriarRequisicao())), )
+      );
+    }
+
+    if (permissao == 'admin' || permissao == 'almoxarife') {
+      children.addAll([
+        SpeedDialChild( child: const Icon(Icons.inventory_2), label: 'Novo Produto', onTap: () => Navigator.push(context, MaterialPageRoute(builder: (c) => const TelaCadastroProduto())), ),
+        SpeedDialChild( child: const Icon(Icons.sync_alt), label: 'Nova Movimentação', onTap: () => Navigator.push(context, MaterialPageRoute(builder: (c) => const TelaMovimentacao())), ),
+        SpeedDialChild( child: const Icon(Icons.person_add), label: 'Novo Parceiro', onTap: () => Navigator.push(context, MaterialPageRoute(builder: (c) => const TelaCadastroParceiro())), ),
+      ]);
+    }
+
+    // Ordena os botões alfabeticamente pelo label para consistência
+    children.sort((a, b) => a.label!.compareTo(b.label!));
+
     return SpeedDial(
       icon: Icons.add,
       activeIcon: Icons.close,
       backgroundColor: Theme.of(context).colorScheme.secondary,
       foregroundColor: Colors.white,
       buttonSize: const Size(56.0, 56.0),
-      children: [
-        SpeedDialChild(
-          child: const Icon(Icons.inventory_2),
-          label: 'Novo Produto',
-          onTap: () => Navigator.push(context, MaterialPageRoute(builder: (c) => const TelaCadastroProduto())),
-        ),
-        SpeedDialChild(
-          child: const Icon(Icons.sync_alt),
-          label: 'Nova Movimentação',
-          onTap: () => Navigator.push(context, MaterialPageRoute(builder: (c) => const TelaMovimentacao())),
-        ),
-        SpeedDialChild(
-          child: const Icon(Icons.person_add),
-          label: 'Novo Parceiro',
-          onTap: () => Navigator.push(context, MaterialPageRoute(builder: (c) => const TelaCadastroParceiro())),
-        ),
-      ],
+      visible: children.isNotEmpty, // Esconde o botão '+' se não houver ações
+      children: children,
     );
   }
 
   void _mostrarDialogoSC(BuildContext context, QueryDocumentSnapshot produtoDoc) {
     final scController = TextEditingController(text: (produtoDoc.data() as Map<String, dynamic>)['numeroSC'] ?? '');
-    showDialog(
-      context: context,
-      builder: (context) {
-        return AlertDialog(
-          title: const Text('Solicitação de Compra'),
-          content: TextField(
-            controller: scController,
-            keyboardType: TextInputType.text,
-            decoration: const InputDecoration(labelText: 'Número da SC'),
-          ),
-          actions: [
-            TextButton(child: const Text('Cancelar'), onPressed: () => Navigator.of(context).pop()),
-            ElevatedButton(
-              child: const Text('Salvar'),
-              onPressed: () async {
-                await FirebaseFirestore.instance.collection('produtos').doc(produtoDoc.id).update({'numeroSC': scController.text.trim()});
-                if(mounted) Navigator.of(context).pop();
-              },
-            ),
-          ],
-        );
-      },
-    );
+    showDialog( context: context, builder: (context) { return AlertDialog( title: const Text('Solicitação de Compra'), content: TextField( controller: scController, keyboardType: TextInputType.text, decoration: const InputDecoration(labelText: 'Número da SC'), ), actions: [ TextButton(child: const Text('Cancelar'), onPressed: () => Navigator.of(context).pop()), ElevatedButton( child: const Text('Salvar'), onPressed: () async { await FirebaseFirestore.instance.collection('produtos').doc(produtoDoc.id).update({'numeroSC': scController.text.trim()}); if(mounted) Navigator.of(context).pop(); }, ), ], ); }, );
   }
 
   void _mostrarDialogoDeConfirmacao(BuildContext context, QueryDocumentSnapshot produtoDoc) {
     final nomeProduto = (produtoDoc.data() as Map<String, dynamic>)['nome'] ?? 'este produto';
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Confirmar Exclusão'),
-        content: Text('Tem certeza que deseja excluir "$nomeProduto"?\nEsta ação não pode ser desfeita.'),
-        actions: [
-          TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Cancelar')),
-          TextButton(
-            child: const Text('Excluir', style: TextStyle(color: Colors.red)),
-            onPressed: () async {
-              await FirebaseFirestore.instance.collection('produtos').doc(produtoDoc.id).delete();
-              if(mounted) Navigator.of(context).pop();
-            },
-          ),
-        ],
-      ),
-    );
+    showDialog( context: context, builder: (context) => AlertDialog( title: const Text('Confirmar Exclusão'), content: Text('Tem certeza que deseja excluir "$nomeProduto"?\nEsta ação não pode ser desfeita.'), actions: [ TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Cancelar')), TextButton( child: const Text('Excluir', style: TextStyle(color: Colors.red)), onPressed: () async { await FirebaseFirestore.instance.collection('produtos').doc(produtoDoc.id).delete(); if(mounted) Navigator.of(context).pop(); }, ), ], ), );
   }
-}
+
+} // FIM DA CLASSE
