@@ -1,9 +1,10 @@
-// CÓDIGO COMPLETO - TELA HOME (v. 20/10/2025 - Com Permissões de Usuário - SEM ABREVIAÇÕES)
+// Salve este arquivo como: telas/tela_lista_produtos.dart
+// (Este é o seu código da tela_home.dart, mas modificado com a BUSCA CORRIGIDA)
 
 import 'dart:async';
 import 'dart:io';
 import 'package:estocando/telas/tela_gerenciar_movimentacoes.dart';
-import 'package:estocando/telas/tela_historico.dart'; // Verifique se TelaRelatorios está aqui
+import 'package:estocando/telas/tela_historico.dart';
 import 'package:estocando/models/movimentacao.dart';
 import 'package:flutter/foundation.dart';
 import 'package:universal_html/html.dart' as html;
@@ -18,7 +19,6 @@ import 'package:estocando/telas/tela_parceiros.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:flutter_speed_dial/flutter_speed_dial.dart';
 import 'package:intl/intl.dart';
 import 'tela_cadastro_produto.dart';
 import 'package:estocando/telas/tela_criar_requisicao.dart';
@@ -27,15 +27,20 @@ import 'package:excel/excel.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 
-
 enum FiltroProdutos { ativos, inativos, todos, pontoDePedido }
 enum AcoesProduto { editar, solicitarCompra, excluir }
-class TelaHome extends StatefulWidget {
-  const TelaHome({super.key});
+
+// Renomeamos a classe
+class TelaListaProdutos extends StatefulWidget {
+  // Adicionamos este campo para receber a busca da Home
+  final String? termoBuscaInicial;
+
+  const TelaListaProdutos({super.key, this.termoBuscaInicial});
   @override
-  State<TelaHome> createState() => _TelaHomeState();
+  State<TelaListaProdutos> createState() => _TelaListaProdutosState();
 }
-class _TelaHomeState extends State<TelaHome> {
+
+class _TelaListaProdutosState extends State<TelaListaProdutos> {
   bool _isSearching = false;
   final _searchController = TextEditingController();
   FiltroProdutos _filtroAtual = FiltroProdutos.ativos;
@@ -50,30 +55,38 @@ class _TelaHomeState extends State<TelaHome> {
     super.initState();
     _searchController.addListener(_onSearchChanged);
     _carregarDadosUsuario();
+
+    // Lógica para ativar a busca se ela veio da Home
+    if (widget.termoBuscaInicial != null &&
+        widget.termoBuscaInicial!.isNotEmpty) {
+      setState(() {
+        _isSearching = true;
+        _searchController.text = widget.termoBuscaInicial!;
+      });
+    }
   }
 
   Future<void> _carregarDadosUsuario() async {
     User? user = FirebaseAuth.instance.currentUser;
     if (user != null) {
-      DocumentSnapshot userData = await FirebaseFirestore.instance.collection('usuarios').doc(user.uid).get();
+      DocumentSnapshot userData =
+      await FirebaseFirestore.instance.collection('usuarios').doc(user.uid).get();
 
       if (mounted && userData.exists) {
         final data = userData.data() as Map<String, dynamic>;
         setState(() {
           _permissaoUsuario = data['permissao'];
           _empresaId = data['empresaId'];
-          if (_permissaoUsuario == null || !['admin', 'almoxarife', 'producao'].contains(_permissaoUsuario)) {
-            print("AVISO: Permissão de usuário inválida ou nula ('$_permissaoUsuario'), definindo como 'producao'.");
+          if (_permissaoUsuario == null ||
+              !['admin', 'almoxarife', 'producao']
+                  .contains(_permissaoUsuario)) {
             _permissaoUsuario = 'producao';
           }
-          print("Permissão do usuário carregada: $_permissaoUsuario");
         });
       } else {
-        print("AVISO: Documento do usuário não encontrado no Firestore.");
         if (mounted) setState(() => _permissaoUsuario = 'producao');
       }
     } else {
-      print("AVISO: Nenhum usuário logado.");
       if (mounted) setState(() => _permissaoUsuario = 'producao');
     }
     if (mounted) {
@@ -101,6 +114,7 @@ class _TelaHomeState extends State<TelaHome> {
   }
 
   Future<void> _exportarProdutosParaExcel() async {
+    // (O código desta função permanece o mesmo da sua tela_home.dart original)
     try {
       if (_empresaId == null) {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar( content: Text('Erro: ID da empresa não encontrado. Tente novamente.'), backgroundColor: Colors.red, ));
@@ -151,16 +165,21 @@ class _TelaHomeState extends State<TelaHome> {
     }
   }
 
+
   @override
   Widget build(BuildContext context) {
-    Query query = FirebaseFirestore.instance.collection('produtos').where('empresaId', isEqualTo: 'dummy_id');
+    Query query = FirebaseFirestore.instance
+        .collection('produtos')
+        .where('empresaId', isEqualTo: 'dummy_id');
 
     if (_empresaId != null) {
-      query = FirebaseFirestore.instance.collection('produtos')
+      query = FirebaseFirestore.instance
+          .collection('produtos')
           .where('empresaId', isEqualTo: _empresaId);
     }
 
-    if (_filtroAtual == FiltroProdutos.ativos || _filtroAtual == FiltroProdutos.pontoDePedido) {
+    if (_filtroAtual == FiltroProdutos.ativos ||
+        _filtroAtual == FiltroProdutos.pontoDePedido) {
       query = query.where('ativo', isEqualTo: true);
     } else if (_filtroAtual == FiltroProdutos.inativos) {
       query = query.where('ativo', isEqualTo: false);
@@ -170,20 +189,21 @@ class _TelaHomeState extends State<TelaHome> {
 
     return Scaffold(
       appBar: _buildAppBar(),
-      drawer: _carregandoDadosIniciais || _permissaoUsuario == null
-          ? const Drawer(child: Center(child: CircularProgressIndicator()))
-          : _buildDrawer(context, _permissaoUsuario!),
-      floatingActionButton: _carregandoDadosIniciais || _permissaoUsuario == null
-          ? null
-          : _buildSpeedDial(context, _permissaoUsuario!),
+      // Drawer e FloatingActionButton foram removidos daqui
       body: _carregandoDadosIniciais
           ? const Center(child: CircularProgressIndicator())
           : StreamBuilder<QuerySnapshot>(
         stream: query.snapshots(),
         builder: (context, snapshot) {
-          if (snapshot.hasError) return const Center(child: Text('Ocorreu um erro ao carregar os produtos.'));
-          if (snapshot.connectionState == ConnectionState.waiting) return const Center(child: CircularProgressIndicator());
-          if (!snapshot.hasData || snapshot.data!.docs.isEmpty) return const Center(child: Text('Nenhum produto para exibir.', style: TextStyle(fontSize: 18, color: Colors.grey)));
+          if (snapshot.hasError)
+            return const Center(
+                child: Text('Ocorreu um erro ao carregar os produtos.'));
+          if (snapshot.connectionState == ConnectionState.waiting)
+            return const Center(child: CircularProgressIndicator());
+          if (!snapshot.hasData || snapshot.data!.docs.isEmpty)
+            return const Center(
+                child: Text('Nenhum produto para exibir.',
+                    style: TextStyle(fontSize: 18, color: Colors.grey)));
 
           List<QueryDocumentSnapshot> produtos = snapshot.data!.docs;
 
@@ -196,8 +216,11 @@ class _TelaHomeState extends State<TelaHome> {
             }).toList();
           }
 
-          final String queryBusca = _searchController.text.toLowerCase().trim();
+          // ---> INÍCIO DA CORREÇÃO DO PONTO 1 (BUSCA) <---
+          final String queryBusca =
+          _searchController.text.toLowerCase().trim();
           if (queryBusca.isNotEmpty) {
+            // 1. O .where() agora filtra tudo que "contenha" a busca
             produtos = produtos.where((doc) {
               final data = doc.data() as Map<String, dynamic>;
               final nome = (data['nome'] ?? '').toLowerCase();
@@ -205,6 +228,7 @@ class _TelaHomeState extends State<TelaHome> {
               return nome.contains(queryBusca) || codigo.contains(queryBusca);
             }).toList();
 
+            // 2. O .sort() organiza com a prioridade que você pediu
             produtos.sort((a, b) {
               final dataA = a.data() as Map<String, dynamic>;
               final dataB = b.data() as Map<String, dynamic>;
@@ -212,12 +236,25 @@ class _TelaHomeState extends State<TelaHome> {
               final codigoA = (dataA['codigo'] ?? '').toLowerCase();
               final nomeB = (dataB['nome'] ?? '').toLowerCase();
               final codigoB = (dataB['codigo'] ?? '').toLowerCase();
-              int getMatchScore(String nome, String codigo) { if (codigo == queryBusca) return 1; if (codigo.startsWith(queryBusca)) return 2; if (nome.startsWith(queryBusca)) return 3; return 4; }
+
+              // Função de pontuação melhorada
+              int getMatchScore(String nome, String codigo) {
+                if (codigo == queryBusca) return 1; // P1: Código exato
+                if (codigo.startsWith(queryBusca)) return 2; // P2: Código começa com
+                if (nome.startsWith(queryBusca)) return 3; // P3: Nome começa com
+                if (nome.contains(queryBusca)) return 4; // P4: Nome contém
+                if (codigo.contains(queryBusca)) return 5; // P5: Código contém
+                return 6; // Outros
+              }
+
               final scoreA = getMatchScore(nomeA, codigoA);
               final scoreB = getMatchScore(nomeB, codigoB);
+
+              // Compara primeiro pela pontuação, depois por ordem alfabética
               return scoreA != scoreB ? scoreA.compareTo(scoreB) : nomeA.compareTo(nomeB);
             });
           } else {
+            // Lógica de ordenação padrão (quando não há busca)
             produtos.sort((a, b) {
               final dataA = a.data() as Map<String, dynamic>;
               final dataB = b.data() as Map<String, dynamic>;
@@ -233,6 +270,8 @@ class _TelaHomeState extends State<TelaHome> {
               return prioridadeA != prioridadeB ? prioridadeA.compareTo(prioridadeB) : nomeA.toLowerCase().compareTo(nomeB.toLowerCase());
             });
           }
+          // ---> FIM DA CORREÇÃO DO PONTO 1 (BUSCA) <---
+
 
           if (produtos.isEmpty) {
             String msg = 'Nenhum produto encontrado para "$queryBusca"';
@@ -243,7 +282,8 @@ class _TelaHomeState extends State<TelaHome> {
           return ListView.builder(
             padding: const EdgeInsets.only(bottom: 80.0),
             itemCount: produtos.length,
-            itemBuilder: (context, index) => _buildCardProduto(context, produtos[index], _permissaoUsuario!),
+            itemBuilder: (context, index) => _buildCardProduto(
+                context, produtos[index], _permissaoUsuario!),
           );
         },
       ),
@@ -251,189 +291,77 @@ class _TelaHomeState extends State<TelaHome> {
   }
 
   AppBar _buildAppBar() {
-    String titulo = 'Estocando';
-    if (_filtroAtual == FiltroProdutos.pontoDePedido) titulo = 'Ponto de Pedido';
-    else if (_filtroAtual == FiltroProdutos.ativos) titulo = 'Estoque (Ativos)';
-    else if (_filtroAtual == FiltroProdutos.inativos) titulo = 'Estoque (Inativos)';
-    else if (_filtroAtual == FiltroProdutos.todos) titulo = 'Estoque (Todos)';
+    String titulo = 'Lista de Produtos'; // Título simplificado
+    if (_filtroAtual == FiltroProdutos.pontoDePedido)
+      titulo = 'Ponto de Pedido';
+    else if (_filtroAtual == FiltroProdutos.ativos)
+      titulo = 'Produtos (Ativos)';
+    else if (_filtroAtual == FiltroProdutos.inativos)
+      titulo = 'Produtos (Inativos)';
+    else if (_filtroAtual == FiltroProdutos.todos)
+      titulo = 'Produtos (Todos)';
 
     if (!_isSearching) {
       return AppBar(
         title: Text(titulo),
         actions: [
-          IconButton(icon: const Icon(Icons.search), onPressed: () => setState(() => _isSearching = true)),
+          IconButton(
+              icon: const Icon(Icons.search),
+              onPressed: () => setState(() => _isSearching = true)),
           PopupMenuButton<FiltroProdutos>(
             icon: const Icon(Icons.filter_list),
-            onSelected: (FiltroProdutos result) => setState(() => _filtroAtual = result),
-            itemBuilder: (BuildContext context) => <PopupMenuEntry<FiltroProdutos>>[
-              const PopupMenuItem(value: FiltroProdutos.ativos, child: Text('Ver Ativos')),
-              const PopupMenuItem(value: FiltroProdutos.pontoDePedido, child: Row(children: [Icon(Icons.warning_amber_rounded, color: Colors.orange), SizedBox(width: 8), Text('Ponto de Pedido')])),
-              const PopupMenuItem(value: FiltroProdutos.inativos, child: Text('Ver Inativos')),
-              const PopupMenuItem(value: FiltroProdutos.todos, child: Text('Ver Todos')),
+            onSelected: (FiltroProdutos result) =>
+                setState(() => _filtroAtual = result),
+            itemBuilder: (BuildContext context) =>
+            <PopupMenuEntry<FiltroProdutos>>[
+              const PopupMenuItem(
+                  value: FiltroProdutos.ativos, child: Text('Ver Ativos')),
+              const PopupMenuItem(
+                  value: FiltroProdutos.pontoDePedido,
+                  child: Row(children: [
+                    Icon(Icons.warning_amber_rounded, color: Colors.orange),
+                    SizedBox(width: 8),
+                    Text('Ponto de Pedido')
+                  ])),
+              const PopupMenuItem(
+                  value: FiltroProdutos.inativos, child: Text('Ver Inativos')),
+              const PopupMenuItem(
+                  value: FiltroProdutos.todos, child: Text('Ver Todos')),
             ],
           ),
         ],
       );
     } else {
       return AppBar(
-        leading: IconButton(icon: const Icon(Icons.arrow_back), onPressed: () => setState(() { _isSearching = false; _searchController.clear(); })),
+        leading: IconButton(
+            icon: const Icon(Icons.arrow_back),
+            onPressed: () => setState(() {
+              _isSearching = false;
+              _searchController.clear();
+              // Se fecharmos a busca que veio da Home, voltamos para a Home
+              if (widget.termoBuscaInicial != null) {
+                Navigator.of(context).pop();
+              }
+            })),
         title: TextField(
           controller: _searchController,
           autofocus: true,
-          decoration: const InputDecoration(hintText: 'Buscar por código ou nome...', hintStyle: TextStyle(color: Colors.white70), border: InputBorder.none),
+          decoration: const InputDecoration(
+              hintText: 'Buscar por código ou nome...',
+              hintStyle: TextStyle(color: Colors.white70),
+              border: InputBorder.none),
           style: const TextStyle(color: Colors.white),
         ),
-        actions: [IconButton(icon: const Icon(Icons.clear), onPressed: () => setState(() => _searchController.clear()))],
+        actions: [
+          IconButton(
+              icon: const Icon(Icons.clear),
+              onPressed: () => setState(() => _searchController.clear()))
+        ],
       );
     }
   }
 
-  Drawer _buildDrawer(BuildContext context, String permissao) {
-    final String? currentUserEmail = FirebaseAuth.instance.currentUser?.email;
-    final bool isAdmin = permissao == 'admin';
-    final bool isAlmoxarife = permissao == 'almoxarife';
-
-    return Drawer(
-      child: ListView(
-        padding: EdgeInsets.zero,
-        children: [
-          DrawerHeader(
-            decoration: BoxDecoration(color: Theme.of(context).colorScheme.primary),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text('Estocando', style: TextStyle(color: Colors.white, fontSize: 24)),
-                const Spacer(),
-                Text(currentUserEmail ?? 'Usuário', style: const TextStyle(color: Colors.white, fontSize: 16)),
-              ],
-            ),
-          ),
-
-          // Itens visíveis para Admin e Almoxarife
-          if (isAdmin || isAlmoxarife) ...[
-            ListTile(
-                title: const Text('Parceiros'),
-                leading: const Icon(Icons.people),
-                onTap: () {
-                  Navigator.pop(context);
-                  Navigator.push(context, MaterialPageRoute(builder: (c) => const TelaParceiros()));
-                }
-            ),
-            ListTile(
-                title: const Text('Extrato de Movimentações'),
-                leading: const Icon(Icons.receipt_long),
-                onTap: () {
-                  Navigator.pop(context);
-                  Navigator.push(context, MaterialPageRoute(builder: (c) => const TelaExtratoMovimentacoes()));
-                }
-            ),
-            ListTile(
-              title: const Text('Dashboard de Relatórios'),
-              leading: const Icon(Icons.dashboard),
-              onTap: () {
-                Navigator.pop(context);
-                Navigator.push(context, MaterialPageRoute(builder: (c) => const TelaRelatorios())); // Confirme o nome da classe
-              },
-            ),
-          ],
-
-          // Exportar Excel (Ajuste a permissão se necessário, aqui está para Admin/Almoxarife)
-          if (isAdmin || isAlmoxarife)
-            ListTile(
-              title: const Text('Exportar Produtos (Excel)'),
-              leading: const Icon(Icons.download_for_offline),
-              onTap: () {
-                Navigator.pop(context);
-                _exportarProdutosParaExcel();
-              },
-            ),
-
-          // Itens de Importação (SOMENTE ADMIN)
-          if (isAdmin) ...[
-            const Divider(),
-            const Padding(
-                padding: EdgeInsets.symmetric(horizontal: 16.0),
-                child: Text('Importação', style: TextStyle(color: Colors.grey))
-            ),
-            ListTile(
-                title: const Text('Importar Produtos'),
-                leading: const Icon(Icons.inventory_2),
-                onTap: () {
-                  Navigator.pop(context);
-                  Navigator.push(context, MaterialPageRoute(builder: (c) => const TelaImportacaoProdutos()));
-                }
-            ),
-            ListTile(
-                title: const Text('Importar Parceiros'),
-                leading: const Icon(Icons.groups),
-                onTap: () {
-                  Navigator.pop(context);
-                  Navigator.push(context, MaterialPageRoute(builder: (c) => const TelaImportacaoParceiros()));
-                }
-            ),
-            ListTile(
-                title: const Text('Importar Movimentações'),
-                leading: const Icon(Icons.sync_alt),
-                onTap: () {
-                  Navigator.pop(context);
-                  Navigator.push(context, MaterialPageRoute(builder: (c) => const TelaImportacaoMovimentacoes()));
-                }
-            ),
-          ],
-
-          // Itens de Administração (Alguns para Admin, outros para Admin/Almoxarife)
-          if (isAdmin || isAlmoxarife) ...[
-            const Divider(),
-            const Padding(
-              padding: EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
-              child: Text('Administração', style: TextStyle(color: Colors.blue, fontWeight: FontWeight.bold)),
-            ),
-            // Somente Admin
-            if (isAdmin)
-              ListTile(
-                leading: const Icon(Icons.admin_panel_settings, color: Colors.blue),
-                title: const Text('Aprovar Usuários', style: TextStyle(fontWeight: FontWeight.bold)),
-                onTap: () {
-                  Navigator.pop(context);
-                  Navigator.push(context, MaterialPageRoute(builder: (c) => const TelaAprovacaoUsuarios()));
-                },
-              ),
-            // Admin e Almoxarife
-            ListTile(
-              leading: const Icon(Icons.edit_note, color: Colors.blue),
-              title: const Text('Gerenciar Movimentações', style: TextStyle(fontWeight: FontWeight.bold)),
-              onTap: () {
-                Navigator.pop(context);
-                Navigator.push(context, MaterialPageRoute(builder: (c) => const TelaGerenciarMovimentacoes()));
-              },
-            ),
-            // Admin e Almoxarife
-            ListTile(
-              leading: const Icon(Icons.shopping_basket_outlined, color: Colors.blue),
-              title: const Text('Atender Requisições', style: TextStyle(fontWeight: FontWeight.bold)),
-              onTap: () {
-                Navigator.pop(context);
-                Navigator.push(context, MaterialPageRoute(builder: (c) => const TelaRequisicoesPendentes()));
-              },
-            ),
-          ],
-
-          // Sair (Visível para TODOS)
-          const Divider(),
-          ListTile(
-            title: const Text('Sair'),
-            leading: const Icon(Icons.logout),
-            onTap: () async {
-              Navigator.pop(context); // Fecha o drawer ANTES de deslogar
-              await FirebaseAuth.instance.signOut();
-              // A navegação para a tela de login geralmente é feita pelo StreamBuilder principal do app
-            },
-          ),
-        ],
-      ),
-    );
-  }
-
+  // O _buildCardProduto permanece o mesmo
   Widget _buildCardProduto(BuildContext context, QueryDocumentSnapshot produtoDoc, String permissao) {
     final data = produtoDoc.data() as Map<String, dynamic>;
     final double quantidade = (data['quantidadeAtual'] ?? 0.0).toDouble();
@@ -542,6 +470,7 @@ class _TelaHomeState extends State<TelaHome> {
     );
   }
 
+  // O _buildActionButton permanece o mesmo
   Widget _buildActionButton(BuildContext context, String label, IconData icon, Color color, VoidCallback onPressed) {
     return TextButton.icon(
       icon: Icon(icon, color: color, size: 20),
@@ -554,45 +483,15 @@ class _TelaHomeState extends State<TelaHome> {
     );
   }
 
-  SpeedDial _buildSpeedDial(BuildContext context, String permissao) {
-    List<SpeedDialChild> children = [];
-
-    if (permissao == 'producao' || permissao == 'admin') {
-      children.add(
-          SpeedDialChild( child: const Icon(Icons.shopping_basket, color: Colors.white), label: 'Nova Requisição', backgroundColor: Colors.blueAccent, onTap: () => Navigator.push(context, MaterialPageRoute(builder: (c) => const TelaCriarRequisicao())), )
-      );
-    }
-
-    if (permissao == 'admin' || permissao == 'almoxarife') {
-      children.addAll([
-        SpeedDialChild( child: const Icon(Icons.inventory_2), label: 'Novo Produto', onTap: () => Navigator.push(context, MaterialPageRoute(builder: (c) => const TelaCadastroProduto())), ),
-        SpeedDialChild( child: const Icon(Icons.sync_alt), label: 'Nova Movimentação', onTap: () => Navigator.push(context, MaterialPageRoute(builder: (c) => const TelaMovimentacao())), ),
-        SpeedDialChild( child: const Icon(Icons.person_add), label: 'Novo Parceiro', onTap: () => Navigator.push(context, MaterialPageRoute(builder: (c) => const TelaCadastroParceiro())), ),
-      ]);
-    }
-
-    // Ordena os botões alfabeticamente pelo label para consistência
-    children.sort((a, b) => a.label!.compareTo(b.label!));
-
-    return SpeedDial(
-      icon: Icons.add,
-      activeIcon: Icons.close,
-      backgroundColor: Theme.of(context).colorScheme.secondary,
-      foregroundColor: Colors.white,
-      buttonSize: const Size(56.0, 56.0),
-      visible: children.isNotEmpty, // Esconde o botão '+' se não houver ações
-      children: children,
-    );
-  }
-
+  // O _mostrarDialogoSC permanece o mesmo
   void _mostrarDialogoSC(BuildContext context, QueryDocumentSnapshot produtoDoc) {
     final scController = TextEditingController(text: (produtoDoc.data() as Map<String, dynamic>)['numeroSC'] ?? '');
     showDialog( context: context, builder: (context) { return AlertDialog( title: const Text('Solicitação de Compra'), content: TextField( controller: scController, keyboardType: TextInputType.text, decoration: const InputDecoration(labelText: 'Número da SC'), ), actions: [ TextButton(child: const Text('Cancelar'), onPressed: () => Navigator.of(context).pop()), ElevatedButton( child: const Text('Salvar'), onPressed: () async { await FirebaseFirestore.instance.collection('produtos').doc(produtoDoc.id).update({'numeroSC': scController.text.trim()}); if(mounted) Navigator.of(context).pop(); }, ), ], ); }, );
   }
 
+  // O _mostrarDialogoDeConfirmacao permanece o mesmo
   void _mostrarDialogoDeConfirmacao(BuildContext context, QueryDocumentSnapshot produtoDoc) {
     final nomeProduto = (produtoDoc.data() as Map<String, dynamic>)['nome'] ?? 'este produto';
     showDialog( context: context, builder: (context) => AlertDialog( title: const Text('Confirmar Exclusão'), content: Text('Tem certeza que deseja excluir "$nomeProduto"?\nEsta ação não pode ser desfeita.'), actions: [ TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Cancelar')), TextButton( child: const Text('Excluir', style: TextStyle(color: Colors.red)), onPressed: () async { await FirebaseFirestore.instance.collection('produtos').doc(produtoDoc.id).delete(); if(mounted) Navigator.of(context).pop(); }, ), ], ), );
   }
-
 } // FIM DA CLASSE

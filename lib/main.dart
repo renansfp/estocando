@@ -1,4 +1,6 @@
-import 'package:estocando/telas/tela_home.dart';
+// Arquivo: main.dart (COMPLETO E ATUALIZADO)
+
+import 'package:estocando/telas/home_screen.dart'; // ---> MUDANÇA 1: Importamos a nova 'home_screen.dart'
 import 'package:estocando/telas/tela_login.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
@@ -69,7 +71,8 @@ class MyApp extends StatelessWidget {
             return const Scaffold(body: Center(child: CircularProgressIndicator()));
           }
           if (snapshot.hasData) {
-            return const TelaHome();
+            // ---> MUDANÇA 2: Agora ele chama a 'HomeScreen' (Dashboard) em vez da 'TelaHome' antiga
+            return const HomeScreen();
           }
           return const TelaLogin();
         },
