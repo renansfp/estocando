@@ -1,4 +1,4 @@
-// Salve este arquivo como: telas/home_screen.dart (VERSÃO CORRIGIDA FINAL)
+// Salve este arquivo como: telas/home_screen.dart (VERSÃO SEM BOTÃO FLUTUANTE)
 
 import 'package:estocando/telas/tela_criar_requisicao.dart';
 import 'package:estocando/telas/tela_requisicoes_pendentes.dart';
@@ -8,10 +8,10 @@ import 'package:estocando/telas/tela_lista_produtos.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
-// Importamos o SpeedDial
-import 'package:flutter_speed_dial/flutter_speed_dial.dart';
+// ---> MUDANÇA 1: O SpeedDial não é mais necessário <---
+// import 'package:flutter_speed_dial/flutter_speed_dial.dart';
 
-// Imports para o Drawer e SpeedDial
+// Imports para o Drawer e Ações
 import 'package:estocando/telas/tela_aprovacao_usuarios.dart';
 import 'package:estocando/telas/tela_extrato_movimentacoes.dart';
 import 'package:estocando/telas/tela_importacao_movimentacoes.dart';
@@ -94,25 +94,20 @@ class _HomeScreenState extends State<HomeScreen> {
     super.dispose();
   }
 
-  // ---> ESTA É A FUNÇÃO QUE FAZ A BUSCA FUNCIONAR <---
   void _irParaListaDeProdutos(String? termoBuscado) {
-    // Fecha o Drawer caso ele esteja aberto
     if (Navigator.of(context).canPop()) {
       Navigator.of(context).pop();
     }
 
-    // Navega para a tela da lista de produtos
     Navigator.push(
       context,
       MaterialPageRoute(
         builder: (context) => TelaListaProdutos(
-          // Passa o termo de busca para a outra tela
           termoBuscaInicial: termoBuscado,
         ),
       ),
     );
 
-    // Limpa o campo de busca aqui no Dashboard
     _buscaController.clear();
     FocusScope.of(context).unfocus();
   }
@@ -131,11 +126,25 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  // ---> MUDANÇA 2: Criamos funções de navegação para os novos botões <---
+  void _irParaNovaMovimentacao() {
+    Navigator.push(context, MaterialPageRoute(builder: (c) => const TelaMovimentacao()));
+  }
+
+  void _irParaNovoProduto() {
+    Navigator.push(context, MaterialPageRoute(builder: (c) => const TelaCadastroProduto()));
+  }
+
+  void _irParaNovoParceiro() {
+    Navigator.push(context, MaterialPageRoute(builder: (c) => const TelaCadastroParceiro()));
+  }
+
+
   @override
   Widget build(BuildContext context) {
-    // Lógica de permissão para os botões
     final bool isAdmin = _permissaoUsuario == 'admin';
     final bool isAlmoxarife = _permissaoUsuario == 'almoxarife';
+    final bool isProducao = _permissaoUsuario == 'producao';
 
     return Scaffold(
       appBar: AppBar(
@@ -146,27 +155,26 @@ class _HomeScreenState extends State<HomeScreen> {
           ? const Drawer(child: Center(child: CircularProgressIndicator()))
           : _buildDrawer(),
 
-      // Adicionamos o SpeedDial (botão '+') de volta
-      floatingActionButton: _carregandoDadosIniciais || _permissaoUsuario == null
-          ? null
-          : _buildSpeedDial(context, _permissaoUsuario!),
+      // ---> MUDANÇA 3: O floatingActionButton foi removido <---
+      // floatingActionButton: ...
 
-      body: Padding(
+      // ---> MUDANÇA 4: O body agora é um ListView para evitar overflow <---
+      body: _carregandoDadosIniciais
+          ? const Center(child: CircularProgressIndicator())
+          : ListView( // Usamos ListView para rolar a tela se houver muitos botões
         padding: const EdgeInsets.all(16.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            // ---> ESTE É O CAMPO DE BUSCA <---
-            _buildCampoBusca(),
-            const SizedBox(height: 32),
+        children: [
+          _buildCampoBusca(),
+          const SizedBox(height: 32),
 
-            Text(
-              'Acesso Rápido',
-              style: Theme.of(context).textTheme.titleLarge,
-            ),
-            const SizedBox(height: 16),
+          Text(
+            'Acesso Rápido',
+            style: Theme.of(context).textTheme.titleLarge,
+          ),
+          const SizedBox(height: 16),
 
-            // Botão de Criar Requisição (Todos veem)
+          // Botão de Criar Requisição (Produção ou Admin)
+          if (isProducao || isAdmin) ...[
             _buildBotaoAcessoRapido(
               contexto: context,
               icone: Icons.add_shopping_cart,
@@ -176,25 +184,64 @@ class _HomeScreenState extends State<HomeScreen> {
               onPressed: _irParaCriarRequisicao,
             ),
             const SizedBox(height: 12),
-
-            // Botão "Requisições Pendentes" (Ponto 3 corrigido)
-            // Só aparece se for Admin ou Almoxarife
-            if (isAdmin || isAlmoxarife)
-              _buildBotaoAcessoRapido(
-                contexto: context,
-                icone: Icons.pending_actions,
-                titulo: 'Requisições Pendentes',
-                subtitulo: 'Aprovar ou reprovar pedidos',
-                cor: Colors.orangeAccent,
-                onPressed: _irParaRequisicoesPendentes,
-              ),
           ],
-        ),
-      ),
+
+          // Botão "Requisições Pendentes" (Admin ou Almoxarife)
+          if (isAdmin || isAlmoxarife) ...[
+            _buildBotaoAcessoRapido(
+              contexto: context,
+              icone: Icons.pending_actions,
+              titulo: 'Requisições Pendentes',
+              subtitulo: 'Aprovar ou reprovar pedidos',
+              cor: Colors.orangeAccent,
+              onPressed: _irParaRequisicoesPendentes,
+            ),
+            const SizedBox(height: 12),
+          ],
+
+          // ---> MUDANÇA 5: Nova seção "Cadastros e Ações" <---
+          if (isAdmin || isAlmoxarife) ...[
+            const SizedBox(height: 20), // Espaço extra
+            Text(
+              'Cadastros e Ações',
+              style: Theme.of(context).textTheme.titleLarge,
+            ),
+            const SizedBox(height: 16),
+
+            _buildBotaoAcessoRapido(
+              contexto: context,
+              icone: Icons.sync_alt,
+              titulo: 'Nova Movimentação',
+              subtitulo: 'Registrar entrada ou saída manual',
+              cor: Colors.green.shade600,
+              onPressed: _irParaNovaMovimentacao,
+            ),
+            const SizedBox(height: 12),
+
+            _buildBotaoAcessoRapido(
+              contexto: context,
+              icone: Icons.inventory_2,
+              titulo: 'Novo Produto',
+              subtitulo: 'Cadastrar um novo item no estoque',
+              cor: Colors.purple.shade400,
+              onPressed: _irParaNovoProduto,
+            ),
+            const SizedBox(height: 12),
+
+            _buildBotaoAcessoRapido(
+              contexto: context,
+              icone: Icons.person_add,
+              titulo: 'Novo Parceiro',
+              subtitulo: 'Cadastrar cliente ou fornecedor',
+              cor: Colors.teal.shade400,
+              onPressed: _irParaNovoParceiro,
+            ),
+          ],
+        ],
+       ),
     );
   }
 
-  // ---> ESTA É A LÓGICA DO CAMPO DE BUSCA <---
   Widget _buildCampoBusca() {
     return TextFormField(
       controller: _buscaController,
@@ -207,10 +254,8 @@ class _HomeScreenState extends State<HomeScreen> {
         filled: true,
         fillColor: Colors.grey[100],
       ),
-      // Ao apertar "Enter" (ou 'concluído') no teclado:
       onFieldSubmitted: (valor) {
         if (valor.trim().isNotEmpty) {
-          // Ele chama a função que navega para a lista
           _irParaListaDeProdutos(valor.trim());
         }
       },
@@ -396,7 +441,6 @@ class _HomeScreenState extends State<HomeScreen> {
             },
           ),
 
-          // "Requisições Pendentes" no Drawer (Ponto 3 corrigido)
           if (isAdmin || isAlmoxarife)
             ListTile(
               leading: const Icon(Icons.pending_actions),
@@ -421,53 +465,6 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  // Esta é a função _buildSpeedDial (Ponto 2 corrigido)
-  SpeedDial _buildSpeedDial(BuildContext context, String permissao) {
-    List<SpeedDialChild> children = [];
-
-    // Perfil Produção (e Admin) pode criar requisição
-    if (permissao == 'producao' || permissao == 'admin') {
-      children.add(
-          SpeedDialChild(
-            child: const Icon(Icons.shopping_basket, color: Colors.white),
-            label: 'Nova Requisição',
-            backgroundColor: Colors.blueAccent,
-            onTap: () => Navigator.push(context, MaterialPageRoute(builder: (c) => const TelaCriarRequisicao())),
-          )
-      );
-    }
-
-    // Perfil Almoxarife (e Admin) pode cadastrar
-    if (permissao == 'admin' || permissao == 'almoxarife') {
-      children.addAll([
-        SpeedDialChild(
-          child: const Icon(Icons.inventory_2),
-          label: 'Novo Produto',
-          onTap: () => Navigator.push(context, MaterialPageRoute(builder: (c) => const TelaCadastroProduto())),
-        ),
-        SpeedDialChild(
-          child: const Icon(Icons.sync_alt),
-          label: 'Nova Movimentação',
-          onTap: () => Navigator.push(context, MaterialPageRoute(builder: (c) => const TelaMovimentacao())),
-        ),
-        SpeedDialChild(
-          child: const Icon(Icons.person_add),
-          label: 'Novo Parceiro',
-          onTap: () => Navigator.push(context, MaterialPageRoute(builder: (c) => const TelaCadastroParceiro())),
-        ),
-      ]);
-    }
-
-    children.sort((a, b) => a.label!.compareTo(b.label!));
-
-    return SpeedDial(
-      icon: Icons.add,
-      activeIcon: Icons.close,
-      backgroundColor: Theme.of(context).colorScheme.secondary, // Vermelho Protecin
-      foregroundColor: Colors.white,
-      buttonSize: const Size(56.0, 56.0),
-      visible: children.isNotEmpty,
-      children: children,
-    );
-  }
+// ---> MUDANÇA 6: A função _buildSpeedDial foi completamente REMOVIDA <---
+// SpeedDial _buildSpeedDial(BuildContext context, String permissao) { ... }
 }
