@@ -1,4 +1,4 @@
-// CÓDIGO COMPLETO E FINAL - telas/tela_requisicoes_pendentes.dart (v. 20/10/2025 - Lógica Separada)
+// CÓDIGO COMPLETO E FINAL - telas/tela_requisicoes_pendentes.dart (v. 22/10/2025 - Passando nomeCliente)
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:estocando/models/requisicao.dart';
@@ -23,12 +23,10 @@ class _TelaRequisicoesPendentesState extends State<TelaRequisicoesPendentes> {
   @override
   void initState() {
     super.initState();
-    print("DEBUG: Iniciando TelaRequisicoesPendentes...");
     _carregarDadosUsuario();
   }
 
   Future<void> _carregarDadosUsuario() async {
-    print("DEBUG: Carregando dados do usuário...");
     User? user = FirebaseAuth.instance.currentUser;
     if (user != null) {
       _usuarioLogado = user;
@@ -36,7 +34,6 @@ class _TelaRequisicoesPendentesState extends State<TelaRequisicoesPendentes> {
         DocumentSnapshot userData = await FirebaseFirestore.instance.collection('usuarios').doc(user.uid).get();
         if (mounted && userData.exists) {
           final data = userData.data() as Map<String, dynamic>;
-          print("DEBUG: Dados do usuário encontrados: ${data['nome']}, Empresa: ${data['empresaId']}");
           setState(() {
             _empresaId = data['empresaId'];
             _dadosUsuarioLogado = data;
@@ -44,39 +41,33 @@ class _TelaRequisicoesPendentesState extends State<TelaRequisicoesPendentes> {
             _carregando = false;
           });
         } else {
-          print("AVISO: Documento do usuário não encontrado no Firestore para UID: ${user.uid}");
           if(mounted) setState(() => _carregando = false);
         }
       } catch (e) {
-        print("Erro ao carregar dados do usuário: $e");
         if(mounted) setState(() => _carregando = false);
       }
     } else {
-      print("AVISO: Nenhum usuário logado ao carregar dados.");
       if(mounted) setState(() => _carregando = false);
     }
   }
 
-  // --- FUNÇÃO DE ATENDER (LÓGICA SEPARADA - VERSÃO FINAL) ---
+  // --- FUNÇÃO DE ATENDER (COM A MUDANÇA) ---
   Future<void> _atenderRequisicao(Requisicao requisicao) async {
     if (_dadosUsuarioLogado == null || _empresaId == null || _usuarioLogado == null) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Erro: Não foi possível identificar o usuário almoxarife.'), backgroundColor: Colors.red));
       return;
     }
 
-    // Usaremos um Map para guardar os dados lidos dos produtos na primeira transação
     Map<String, Map<String, dynamic>> dadosProdutos = {};
     String? erroEstoque;
 
-    // Mostra Dialog inicial
     showDialog( context: context, barrierDismissible: false, builder: (ctx) => const AlertDialog( title: Text('Processando...'), content: Row( children: [ CircularProgressIndicator(), SizedBox(width: 20), Text('Verificando estoque...'), ], ), ), );
 
     final db = FirebaseFirestore.instance;
     final requisicaoRef = db.collection('requisicoes').doc(requisicao.id);
 
     try {
-      // --- TRANSAÇÃO 1: APENAS VERIFICAR ESTOQUE E GUARDAR DADOS ---
-      print("DEBUG: Iniciando Transação 1 (Verificação)...");
+      // --- TRANSAÇÃO 1: VERIFICAR ESTOQUE ---
       await db.runTransaction((transaction) async {
         for (final item in requisicao.itens) {
           final produtoRef = db.collection('produtos').doc(item.produtoId);
@@ -84,7 +75,7 @@ class _TelaRequisicoesPendentesState extends State<TelaRequisicoesPendentes> {
           if (!produtoSnapshot.exists) { throw Exception('O produto ${item.produtoNome} (ID: ${item.produtoId}) não existe mais.'); }
 
           final dadosProduto = produtoSnapshot.data() as Map<String, dynamic>;
-          dadosProdutos[item.produtoId] = dadosProduto; // Guarda os dados lidos
+          dadosProdutos[item.produtoId] = dadosProduto;
 
           final estoqueAtual = (dadosProduto['quantidadeAtual'] ?? 0).toDouble();
           if (estoqueAtual < item.quantidadeSolicitada) {
@@ -93,15 +84,11 @@ class _TelaRequisicoesPendentesState extends State<TelaRequisicoesPendentes> {
           }
         }
       });
-      print("DEBUG: Transação 1 (Verificação) OK.");
-      // Se chegou aqui, estoque estava OK e dadosProdutos está preenchido
 
-      // Atualiza o Dialog
       if(mounted) Navigator.of(context, rootNavigator: true).pop(); // Fecha o dialog antigo
       showDialog( context: context, barrierDismissible: false, builder: (ctx) => const AlertDialog( title: Text('Processando...'), content: Row( children: [ CircularProgressIndicator(), SizedBox(width: 20), Text('Atualizando requisição...'), ], ), ), );
 
-      // --- TRANSAÇÃO 2: APENAS ATUALIZAR STATUS DA REQUISIÇÃO ---
-      print("DEBUG: Iniciando Transação 2 (Update Requisição)...");
+      // --- TRANSAÇÃO 2: ATUALIZAR STATUS DA REQUISIÇÃO ---
       await db.runTransaction((transaction) async {
         transaction.update(requisicaoRef, {
           'status': 'ATENDIDO',
@@ -110,35 +97,29 @@ class _TelaRequisicoesPendentesState extends State<TelaRequisicoesPendentes> {
           'dataAtendimento': Timestamp.now(),
         });
       });
-      print("DEBUG: Transação 2 (Update Requisição) OK.");
-      // Se chegou aqui, o status da requisição foi atualizado
 
-      // Atualiza o Dialog
       if(mounted) Navigator.of(context, rootNavigator: true).pop(); // Fecha o dialog antigo
       showDialog( context: context, barrierDismissible: false, builder: (ctx) => const AlertDialog( title: Text('Processando...'), content: Row( children: [ CircularProgressIndicator(), SizedBox(width: 20), Text('Atualizando estoque e gerando movimentações...'), ], ), ), );
 
-      // --- WRITE BATCH (FORA DAS TRANSAÇÕES) ---
-      print("DEBUG: Iniciando WriteBatch (Update Produtos e Criação Movs)...");
+      // --- WRITE BATCH (Update Produtos e Criação Movs) ---
       final batch = db.batch();
       for (final item in requisicao.itens) {
         final produtoRef = db.collection('produtos').doc(item.produtoId);
-        final dadosProdutoAtual = dadosProdutos[item.produtoId]; // Pega os dados guardados
+        final dadosProdutoAtual = dadosProdutos[item.produtoId];
 
-        if (dadosProdutoAtual == null) { // Segurança extra
+        if (dadosProdutoAtual == null) {
           throw Exception("Erro interno: Dados do produto ${item.produtoNome} não encontrados após verificação.");
         }
 
         final estoqueAtual = (dadosProdutoAtual['quantidadeAtual'] ?? 0).toDouble();
         final novoEstoque = estoqueAtual - item.quantidadeSolicitada;
-        if (novoEstoque < 0) { // Segurança extra
+        if (novoEstoque < 0) {
           throw Exception('Erro Inesperado: Estoque ficou negativo para ${item.produtoNome} durante o Batch.');
         }
 
-        // Adiciona Update do Produto ao Batch
         batch.update(produtoRef, {'quantidadeAtual': novoEstoque});
-        print("DEBUG: Batch: Update estoque ${item.produtoNome} para $novoEstoque");
 
-        // Adiciona Criação da Movimentação ao Batch
+        // ---> ESTA É A MUDANÇA <---
         final novaMovimentacao = Movimentacao(
           empresaId: _empresaId!,
           produtoId: item.produtoId,
@@ -146,7 +127,7 @@ class _TelaRequisicoesPendentesState extends State<TelaRequisicoesPendentes> {
           produtoNome: item.produtoNome,
           tipo: TipoMovimentacao.saida,
           quantidade: item.quantidadeSolicitada,
-          data: DateTime.now(), // Data do atendimento
+          data: DateTime.now(),
           subTipo: requisicao.subTipo,
           numeroOS: requisicao.numeroOS,
           nomeColaborador: requisicao.nomeColaborador,
@@ -154,39 +135,32 @@ class _TelaRequisicoesPendentesState extends State<TelaRequisicoesPendentes> {
           numeroPedido: requisicao.numeroPedido,
           numeroNF: requisicao.numeroNF,
           numeroAG: requisicao.agencia,
-          nomeCliente: null,
-          nomeFornecedor: null,
-          valorUnitarioMovimentacao: (dadosProdutoAtual['valor'] ?? 0.0).toDouble(), // Usa dados guardados
+          nomeCliente: requisicao.nomeCliente, // <-- AQUI! Passamos o cliente da Requisição
+          nomeFornecedor: null, // Saída nunca é de fornecedor
+          valorUnitarioMovimentacao: (dadosProdutoAtual['valor'] ?? 0.0).toDouble(),
         );
         final movimentacaoRef = db.collection('movimentacoes').doc();
         batch.set(movimentacaoRef, novaMovimentacao.toJson());
-        print("DEBUG: Batch: Set movimentação para ${item.produtoNome}");
       }
 
-      // Executa o Batch
       await batch.commit();
-      print("DEBUG: WriteBatch concluído com sucesso.");
-      // --- FIM DO WRITE BATCH ---
-
 
       if(mounted) Navigator.of(context, rootNavigator: true).pop(); // Fecha o último dialog
-
-      // Mensagem de sucesso final
       if(mounted) {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Requisição atendida com sucesso! Estoque atualizado.'), backgroundColor: Colors.green));
       }
 
     } catch (e, s) {
-      if(mounted) Navigator.of(context, rootNavigator: true).pop(); // Fecha qualquer dialog que estiver aberto
+      if(mounted) Navigator.of(context, rootNavigator: true).pop();
       String mensagemErro = erroEstoque ?? e.toString().replaceAll("Exception: ", "");
-      print('--- ERRO DETALHADO (Atender Requisição WEB - Final) ---'); print(mensagemErro); print('Erro original: $e'); print('--- STACK TRACE ---'); print(s);
+      print('--- ERRO DETALHADO (Atender Requisição) ---'); print(mensagemErro); print('Erro original: $e'); print('--- STACK TRACE ---'); print(s);
       if(mounted) { ScaffoldMessenger.of(context).showSnackBar(SnackBar( content: Text('Erro: $mensagemErro'), backgroundColor: Colors.red, duration: const Duration(seconds: 10) )); }
     }
-  } // ---> FIM DA FUNÇÃO _atenderRequisicao <---
+  }
 
+  // (O resto do arquivo - _reprovar, build, etc. - continua idêntico)
   Future<void> _reprovarRequisicao(Requisicao req, String motivo) async {
-    // ... (Função _reprovarRequisicao completa e final) ...
-    if (_dadosUsuarioLogado == null || _empresaId == null || _usuarioLogado == null) { /* ... erro ... */ return; }
+    if (_dadosUsuarioLogado == null || _empresaId == null || _usuarioLogado == null) { return; }
     showDialog( context: context, barrierDismissible: false, builder: (ctx) => const AlertDialog(content: Row(children: [CircularProgressIndicator(), SizedBox(width: 20), Text('Cancelando...')])), );
     final db = FirebaseFirestore.instance;
     final requisicaoRef = db.collection('requisicoes').doc(req.id);
@@ -202,14 +176,12 @@ class _TelaRequisicoesPendentesState extends State<TelaRequisicoesPendentes> {
   }
 
   void _mostrarDialogoReprovar(Requisicao req) {
-    // ... (Função _mostrarDialogoReprovar completa e final) ...
     final motivoController = TextEditingController();
     showDialog( context: context, builder: (ctx) => AlertDialog( title: const Text('Reprovar Requisição'), content: TextField( controller: motivoController, decoration: const InputDecoration( labelText: 'Motivo (opcional)', hintText: 'Ex: Material em falta, Pedido incorreto...', border: OutlineInputBorder(), ), maxLines: 3, ), actions: [ TextButton( child: const Text('Voltar'), onPressed: () => Navigator.of(ctx).pop(), ), ElevatedButton( style: ElevatedButton.styleFrom(backgroundColor: Colors.red), child: const Text('Confirmar Reprovação'), onPressed: () { final motivo = motivoController.text; Navigator.of(ctx).pop(); _reprovarRequisicao(req, motivo); }, ) ], ), );
   }
 
   @override
   Widget build(BuildContext context) {
-    print("DEBUG: Buildando TelaRequisicoesPendentes. Carregando: $_carregando, EmpresaID: $_empresaId");
     return Scaffold(
       appBar: AppBar(
         title: const Text('Requisições Pendentes'),
@@ -222,33 +194,27 @@ class _TelaRequisicoesPendentesState extends State<TelaRequisicoesPendentes> {
           : StreamBuilder<QuerySnapshot>(
         stream: FirebaseFirestore.instance .collection('requisicoes') .where('empresaId', isEqualTo: _empresaId) .where('status', isEqualTo: 'PENDENTE') .orderBy('dataSolicitacao', descending: false) .snapshots(),
         builder: (context, snapshot) {
-          print("DEBUG: StreamBuilder state: ${snapshot.connectionState}");
           if (snapshot.hasError) {
-            print("!!!! ERRO no StreamBuilder: ${snapshot.error}");
             String erroMsg = 'Ocorreu um erro ao carregar as requisições.';
             if (snapshot.error.toString().contains('requires an index')) { erroMsg = 'Erro: O Firestore precisa de um índice para esta consulta...'; }
             else if (snapshot.error.toString().contains('permission-denied')) { erroMsg = 'Erro: Permissão negada...'; }
             return Center(child: Padding( padding: const EdgeInsets.all(16.0), child: Text(erroMsg, style: TextStyle(color: Colors.red.shade700)), ));
           }
-          if (snapshot.connectionState == ConnectionState.waiting) { print("DEBUG: StreamBuilder esperando dados..."); return const Center(child: CircularProgressIndicator()); }
-          if (!snapshot.hasData || snapshot.data == null || snapshot.data!.docs.isEmpty) { print("DEBUG: StreamBuilder sem dados ou lista vazia."); return const Center( child: Text( 'Nenhuma requisição pendente.', style: TextStyle(fontSize: 18, color: Colors.grey), ), ); }
-          print("DEBUG: StreamBuilder recebeu ${snapshot.data!.docs.length} documentos.");
+          if (snapshot.connectionState == ConnectionState.waiting) { return const Center(child: CircularProgressIndicator()); }
+          if (!snapshot.hasData || snapshot.data == null || snapshot.data!.docs.isEmpty) { return const Center( child: Text( 'Nenhuma requisição pendente.', style: TextStyle(fontSize: 18, color: Colors.grey), ), ); }
           List<Requisicao> requisicoes = [];
           List<String> errosDeConversao = [];
           for (var doc in snapshot.data!.docs) {
             try {
-              print("DEBUG: Mapeando doc ID: ${doc.id}");
               final req = Requisicao.fromFirestore(doc);
-              if (req.status != 'INVALIDO' && req.empresaId != 'EMPRESA_INVALIDA') { requisicoes.add(req); print("DEBUG: Doc ${doc.id} mapeado com sucesso."); }
-              else { print("AVISO: Doc ${doc.id} filtrado por ter status/empresa inválido."); }
+              if (req.status != 'INVALIDO' && req.empresaId != 'EMPRESA_INVALIDA') { requisicoes.add(req); }
             } catch (e, s) {
               print("!!!! ERRO ao mapear Requisicao.fromFirestore para doc ID: ${doc.id}"); print("     Erro: $e"); print("     StackTrace: $s");
               errosDeConversao.add("Erro ao processar requisição ${doc.id}: $e");
             }
           }
           if (errosDeConversao.isNotEmpty) { return Center(child: Padding( padding: const EdgeInsets.all(16.0), child: Column( mainAxisAlignment: MainAxisAlignment.center, children: [ Text('Erro ao processar algumas requisições:', style: TextStyle(color: Colors.red.shade700, fontWeight: FontWeight.bold)), const SizedBox(height: 10), Text(errosDeConversao.join('\n'), style: TextStyle(color: Colors.red.shade700)), const SizedBox(height: 20), ElevatedButton(onPressed: (){ setState(() {}); }, child: Text('Tentar Recarregar')) ], ), )); }
-          if (requisicoes.isEmpty) { print("DEBUG: Lista final de requisições vazia após mapeamento/filtro."); return const Center( child: Text( 'Nenhuma requisição pendente válida encontrada.', style: TextStyle(fontSize: 18, color: Colors.grey), ), ); }
-          print("DEBUG: Construindo ListView com ${requisicoes.length} requisições.");
+          if (requisicoes.isEmpty) { return const Center( child: Text( 'Nenhuma requisição pendente válida encontrada.', style: TextStyle(fontSize: 18, color: Colors.grey), ), ); }
           return ListView.builder( itemCount: requisicoes.length, itemBuilder: (context, index) { final req = requisicoes[index]; return _buildCardRequisicao(req); }, );
         },
       ),
@@ -262,10 +228,18 @@ class _TelaRequisicoesPendentesState extends State<TelaRequisicoesPendentes> {
   }
 
   String _getTituloContexto(Requisicao req) {
-    switch (req.subTipo) { case 'OS': return 'OS: ${req.numeroOS ?? "N/A"}'; case 'Colaborador': return 'Colaborador: ${req.nomeColaborador ?? "N/A"}'; case 'Venda (Pedido)': return 'Pedido: ${req.numeroPedido ?? "N/A"}'; case 'Venda (NF)': return 'NF: ${req.numeroNF ?? "N/A"}'; case 'Itau': return 'AG: ${req.agencia ?? "N/A"}'; default: return req.subTipo; }
+    // Agora também mostra o cliente, se houver
+    String? cliente = req.nomeCliente;
+    String prefixo;
+    switch (req.subTipo) { case 'OS': prefixo = 'OS: ${req.numeroOS ?? "N/A"}'; break; case 'Colaborador': prefixo = 'Colaborador: ${req.nomeColaborador ?? "N/A"}'; break; case 'Venda (Pedido)': prefixo = 'Pedido: ${req.numeroPedido ?? "N/A"}'; break; case 'Venda (NF)': prefixo = 'NF: ${req.numeroNF ?? "N/A"}'; break; case 'Itau': prefixo = 'AG: ${req.agencia ?? "N/A"}'; break; default: prefixo = req.subTipo; }
+
+    if (cliente != null && cliente.isNotEmpty) {
+      return '$prefixo - ($cliente)';
+    }
+    return prefixo;
   }
 
   void _mostrarDialogoDetalhes(Requisicao req) {
     showDialog( context: context, builder: (ctx) { return AlertDialog( title: Text(_getTituloContexto(req)), contentPadding: const EdgeInsets.fromLTRB(0, 20, 0, 0), content: Container( width: double.maxFinite, constraints: BoxConstraints( maxHeight: MediaQuery.of(context).size.height * 0.4, ), child: ListView.builder( shrinkWrap: true, itemCount: req.itens.length, itemBuilder: (context, index) { final item = req.itens[index]; return Padding( padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 8.0), child: Row( mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [ Expanded( child: Column( crossAxisAlignment: CrossAxisAlignment.start, children: [ Text(item.produtoNome, style: const TextStyle(fontSize: 15)), Text('Cód: ${item.produtoCodigo}', style: const TextStyle(fontSize: 12, color: Colors.grey)), ], ), ), Text( 'Qtd: ${item.quantidadeSolicitada.toString().replaceAll('.', ',')}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16), ), ], ), ); }, ), ), actionsPadding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0), actionsAlignment: MainAxisAlignment.spaceBetween, actions: <Widget>[ TextButton( style: TextButton.styleFrom(foregroundColor: Colors.red), child: const Text('Reprovar'), onPressed: () { Navigator.of(ctx).pop(); _mostrarDialogoReprovar(req); }, ), Row( mainAxisSize: MainAxisSize.min, children: [ TextButton( child: const Text('Voltar', style: TextStyle(color: Colors.grey)), onPressed: () => Navigator.of(ctx).pop(), ), const SizedBox(width: 8), ElevatedButton( style: ElevatedButton.styleFrom(backgroundColor: Colors.blueAccent), child: const Text('Atender Requisição'), onPressed: () { Navigator.of(ctx).pop(); _atenderRequisicao(req); }, ), ], ) ], ); }, );
   }
-} // FIM DA CLASSEgit push origin main
+}

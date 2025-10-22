@@ -1,4 +1,4 @@
-// CÓDIGO COMPLETO - telas/tela_criar_requisicao.dart (v. 20/10/2025 - Filtro corrigido, tentando limpeza)
+// CÓDIGO COMPLETO - telas/tela_criar_requisicao.dart (v. 22/10/2025 - com Campo de Cliente)
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:estocando/models/requisicao.dart';
@@ -22,6 +22,11 @@ class _TelaCriarRequisicaoState extends State<TelaCriarRequisicao> {
   Map<String, dynamic>? _dadosUsuario;
 
   List<QueryDocumentSnapshot> _listaDeProdutos = [];
+  // ---> MUDANÇA 1: Variáveis para carregar e selecionar parceiros
+  List<QueryDocumentSnapshot> _listaDeParceiros = [];
+  List<QueryDocumentSnapshot> _listaDeClientes = [];
+  QueryDocumentSnapshot? _parceiroDocSelecionado;
+
   bool _carregandoDados = true;
   bool _isSalvando = false;
 
@@ -29,16 +34,11 @@ class _TelaCriarRequisicaoState extends State<TelaCriarRequisicao> {
   QueryDocumentSnapshot? _produtoSelecionadoParaAdicionar;
 
   String? _subtipoSelecionado;
-  final List<String> _subtiposSaida = const [
-    'OS',
-    'Colaborador',
-    'Venda (Pedido)',
-    'Venda (NF)',
-    'Itau'
-  ];
+  final List<String> _subtiposSaida = const [ 'OS', 'Colaborador', 'Venda (Pedido)', 'Venda (NF)', 'Itau' ];
 
-  // Controller para REFERÊNCIA do texto atual, mas não para controle direto do TextFormField
   final _produtoAutocompleteController = TextEditingController();
+  // ---> MUDANÇA 2: Novo controller para o cliente
+  final _parceiroAutocompleteController = TextEditingController();
   final _qtdController = TextEditingController();
   final _numeroOsController = TextEditingController();
   final _colaboradorController = TextEditingController();
@@ -57,6 +57,7 @@ class _TelaCriarRequisicaoState extends State<TelaCriarRequisicao> {
   @override
   void dispose() {
     _produtoAutocompleteController.dispose();
+    _parceiroAutocompleteController.dispose(); // <-- MUDANÇA 3: Dispose
     _qtdController.dispose();
     _numeroOsController.dispose();
     _colaboradorController.dispose();
@@ -78,17 +79,37 @@ class _TelaCriarRequisicaoState extends State<TelaCriarRequisicao> {
       }
       final dadosUsuario = userDoc.data() as Map<String, dynamic>;
       final empresaId = dadosUsuario['empresaId'];
-      final produtosSnapshot = await FirebaseFirestore.instance
-          .collection('produtos')
+
+      // ---> MUDANÇA 4: Carregar produtos E parceiros
+      final db = FirebaseFirestore.instance;
+      final produtosFuture = db.collection('produtos')
           .where('empresaId', isEqualTo: empresaId)
           .where('ativo', isEqualTo: true)
           .orderBy('nome')
           .get();
+
+      final parceirosFuture = db.collection('parceiros')
+          .where('empresaId', isEqualTo: empresaId)
+          .orderBy('nome')
+          .get();
+
+      // Espera ambos terminarem
+      final results = await Future.wait([produtosFuture, parceirosFuture]);
+      final produtosSnapshot = results[0] as QuerySnapshot;
+      final parceirosSnapshot = results[1] as QuerySnapshot;
+
       if (mounted) {
         setState(() {
           _empresaId = empresaId;
           _dadosUsuario = dadosUsuario;
           _listaDeProdutos = produtosSnapshot.docs;
+          _listaDeParceiros = parceirosSnapshot.docs;
+          // Filtra apenas os clientes para o autocomplete
+          _listaDeClientes = _listaDeParceiros.where((doc) {
+            final data = doc.data() as Map<String, dynamic>;
+            return data['tipo'] == 'cliente';
+          }).toList();
+
           _carregandoDados = false;
         });
       }
@@ -101,12 +122,13 @@ class _TelaCriarRequisicaoState extends State<TelaCriarRequisicao> {
   }
 
   void _adicionarItemNaLista() {
+    // (Esta função permanece idêntica)
     if (_itemFormKey.currentState!.validate()) {
       QueryDocumentSnapshot? produtoParaAdicionar = _produtoSelecionadoParaAdicionar;
 
       if (produtoParaAdicionar == null) {
-        final currentText = _produtoAutocompleteController.text.trim(); // Usa nosso controller como referência
-        if (currentText.isEmpty) { // Adiciona validação extra para campo vazio
+        final currentText = _produtoAutocompleteController.text.trim();
+        if (currentText.isEmpty) {
           ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Selecione um produto.'), backgroundColor: Colors.red));
           return;
         }
@@ -147,16 +169,11 @@ class _TelaCriarRequisicaoState extends State<TelaCriarRequisicao> {
           _itensDaRequisicao.insert(0, novoItem);
         });
       }
-
-      // Limpa os campos após adicionar
       _produtoSelecionadoParaAdicionar = null;
-      _produtoAutocompleteController.clear(); // Limpa nosso controller de referência
+      _produtoAutocompleteController.clear();
       _qtdController.clear();
-      FocusScope.of(context).unfocus(); // Esconde o teclado
-      // Força um rebuild para garantir que a limpeza seja refletida visualmente
-      // Isso é crucial para que o fieldViewBuilder use o controller interno limpo na próxima vez
+      FocusScope.of(context).unfocus();
       setState(() {});
-
     }
   }
 
@@ -167,8 +184,9 @@ class _TelaCriarRequisicaoState extends State<TelaCriarRequisicao> {
   }
 
   Future<void> _salvarRequisicao() async {
+    // (Esta função é quase idêntica, apenas adiciona 'nomeCliente')
     if (!_contextFormKey.currentState!.validate()) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Preencha o Destino/Motivo da requisição.'), backgroundColor: Colors.red));
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Preencha os campos obrigatórios da requisição.'), backgroundColor: Colors.red));
       return;
     }
     if (_itensDaRequisicao.isEmpty) {
@@ -185,28 +203,29 @@ class _TelaCriarRequisicaoState extends State<TelaCriarRequisicao> {
     String? erroEstoque;
 
     try {
+      // Verificação de estoque (idêntica)
       await db.runTransaction((transaction) async {
-        print("DEBUG (Criar Req): Iniciando verificação de estoque...");
         for (final item in _itensDaRequisicao) {
           final produtoRef = db.collection('produtos').doc(item.produtoId);
-          print("DEBUG (Criar Req): Verificando ${item.produtoNome} (ID: ${item.produtoId})");
           final produtoSnapshot = await transaction.get(produtoRef);
           if (!produtoSnapshot.exists) {
             erroEstoque = 'O produto ${item.produtoNome} não foi encontrado.';
-            print("DEBUG (Criar Req): Erro - $erroEstoque");
             throw Exception(erroEstoque);
           }
           final dadosProduto = produtoSnapshot.data() as Map<String, dynamic>;
           final estoqueAtual = (dadosProduto['quantidadeAtual'] ?? 0).toDouble();
-          print("DEBUG (Criar Req): Estoque ${item.produtoNome}: $estoqueAtual, Solicitado: ${item.quantidadeSolicitada}");
           if (estoqueAtual < item.quantidadeSolicitada) {
             erroEstoque = 'Estoque insuficiente para: ${item.produtoNome}. (Disponível: $estoqueAtual)';
-            print("DEBUG (Criar Req): Erro - $erroEstoque");
             throw Exception(erroEstoque);
           }
         }
-        print("DEBUG (Criar Req): Verificação de estoque OK.");
       });
+
+      // ---> MUDANÇA 5: Passar o nome do cliente selecionado para o objeto
+      String? nomeClienteFinal;
+      if (_parceiroDocSelecionado != null) {
+        nomeClienteFinal = (_parceiroDocSelecionado!.data() as Map<String, dynamic>)['nome'];
+      }
 
       final novaRequisicao = Requisicao(
         empresaId: _empresaId!,
@@ -222,6 +241,7 @@ class _TelaCriarRequisicaoState extends State<TelaCriarRequisicao> {
         numeroPedido: _numeroPedidoController.text.trim().isNotEmpty ? _numeroPedidoController.text.trim() : null,
         numeroNF: _numeroNfController.text.trim().isNotEmpty ? _numeroNfController.text.trim() : null,
         agencia: _agenciaController.text.trim().isNotEmpty ? _agenciaController.text.trim() : null,
+        nomeCliente: nomeClienteFinal, // <-- AQUI!
       );
       await FirebaseFirestore.instance
           .collection('requisicoes')
@@ -234,9 +254,6 @@ class _TelaCriarRequisicaoState extends State<TelaCriarRequisicao> {
 
     } catch (e) {
       String mensagemErro = erroEstoque ?? e.toString().replaceAll("Exception: ", "");
-      print("--- ERRO AO ENVIAR REQUISIÇÃO ---");
-      print(mensagemErro);
-      print("Erro original: $e");
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
             content: Text('Erro: $mensagemErro'),
@@ -259,7 +276,7 @@ class _TelaCriarRequisicaoState extends State<TelaCriarRequisicao> {
       ),
       body: _carregandoDados
           ? const Center(child: CircularProgressIndicator())
-          : ListView( // Usamos ListView para evitar overflow com o teclado
+          : ListView(
         children: [
           Padding(
             padding: const EdgeInsets.all(16.0),
@@ -272,7 +289,7 @@ class _TelaCriarRequisicaoState extends State<TelaCriarRequisicao> {
                   const SizedBox(height: 16),
                   _buildSubtipoDropdown(),
                   const SizedBox(height: 10),
-                  _buildCamposCondicionais(),
+                  _buildCamposCondicionais(), // <-- O campo de cliente será adicionado aqui dentro
                 ],
               ),
             ),
@@ -297,7 +314,7 @@ class _TelaCriarRequisicaoState extends State<TelaCriarRequisicao> {
                     style: ElevatedButton.styleFrom(
                       backgroundColor: Colors.blueAccent,
                       padding: const EdgeInsets.symmetric(vertical: 16),
-                      minimumSize: const Size(double.infinity, 50), // Garante largura total
+                      minimumSize: const Size(double.infinity, 50),
                     ),
                     onPressed: _adicionarItemNaLista,
                   ),
@@ -306,13 +323,7 @@ class _TelaCriarRequisicaoState extends State<TelaCriarRequisicao> {
             ),
           ),
           const Divider(thickness: 2),
-          // O Container com constraints pode ser removido ou ajustado
-          // Se a lista ficar muito grande, o ListView pai já permite rolar
           _buildListaItensRequisicao(),
-          // Container(
-          //   constraints: const BoxConstraints(maxHeight: 250),
-          //   child: _buildListaItensRequisicao(),
-          // ),
           Padding(
             padding: const EdgeInsets.all(16.0),
             child: ElevatedButton(
@@ -321,7 +332,7 @@ class _TelaCriarRequisicaoState extends State<TelaCriarRequisicao> {
                 backgroundColor: Colors.green,
                 padding: const EdgeInsets.symmetric(vertical: 20),
                 textStyle: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-                minimumSize: const Size(double.infinity, 60), // Garante largura total
+                minimumSize: const Size(double.infinity, 60),
               ),
               child: _isSalvando
                   ? const CircularProgressIndicator(color: Colors.white)
@@ -333,28 +344,21 @@ class _TelaCriarRequisicaoState extends State<TelaCriarRequisicao> {
     );
   }
 
-  // --- Widgets de Item ---
+  // --- Widgets de Item (Idênticos) ---
   Widget _buildSelecaoProdutoAutocomplete() {
     return Autocomplete<QueryDocumentSnapshot>(
       displayStringForOption: (option) {
         final data = option.data() as Map<String, dynamic>;
         return '${data['codigo']} - ${data['nome']}';
       },
-      // ---> MUDANÇA: Voltamos a usar o textEditingController interno <---
       fieldViewBuilder: (context, textEditingController, focusNode, onFieldSubmitted) {
-        // Sincroniza o nosso controller com o interno QUANDO o interno muda
         textEditingController.addListener(() {
           if (_produtoAutocompleteController.text != textEditingController.text) {
-            // Atualiza nosso controller silenciosamente para referência
             _produtoAutocompleteController.value = textEditingController.value;
           }
         });
-        // Se o nosso controller foi limpo (após adicionar), limpa o interno também
         if (_produtoAutocompleteController.text.isEmpty && textEditingController.text.isNotEmpty) {
-          // Usamos addPostFrameCallback para evitar erro de build
           WidgetsBinding.instance.addPostFrameCallback((_) {
-            // Verifica se o controller interno ainda tem texto antes de limpar
-            // Isso evita limpar se o usuário já começou a digitar algo novo
             if (_produtoAutocompleteController.text.isEmpty) {
               textEditingController.clear();
             }
@@ -362,7 +366,7 @@ class _TelaCriarRequisicaoState extends State<TelaCriarRequisicao> {
         }
 
         return TextFormField(
-          controller: textEditingController, // <-- VOLTOU a usar o controller do builder
+          controller: textEditingController,
           focusNode: focusNode,
           decoration: InputDecoration(
             labelText: _carregandoDados ? 'Carregando Produtos...' : 'Produto',
@@ -370,8 +374,8 @@ class _TelaCriarRequisicaoState extends State<TelaCriarRequisicao> {
             suffixIcon: IconButton(
               icon: const Icon(Icons.clear),
               onPressed: () {
-                textEditingController.clear(); // Limpa o interno
-                _produtoAutocompleteController.clear(); // Limpa o nosso
+                textEditingController.clear();
+                _produtoAutocompleteController.clear();
                 _produtoSelecionadoParaAdicionar = null;
                 focusNode.requestFocus();
               },
@@ -381,36 +385,29 @@ class _TelaCriarRequisicaoState extends State<TelaCriarRequisicao> {
             if (value == null || value.isEmpty) {
               return 'Selecione um produto.';
             }
-            // Validação se é válido é feita no _adicionarItemNaLista
             return null;
           },
           onFieldSubmitted: (_) {
-            // Tenta adicionar o item se o usuário apertar Enter no teclado
-            // A validação completa será feita dentro de _adicionarItemNaLista
             _adicionarItemNaLista();
           },
         );
       },
       optionsBuilder: (TextEditingValue textEditingValue) {
+        // (Lógica de busca idêntica)
         final query = textEditingValue.text.toLowerCase().trim();
         if (query.isEmpty) return const Iterable<QueryDocumentSnapshot>.empty();
-
         final exactCodeMatch = _listaDeProdutos.where((option) {
           final data = option.data() as Map<String, dynamic>;
           final codigo = (data['codigo'] ?? '').toLowerCase();
           return codigo == query;
         }).toList();
-
-        if (exactCodeMatch.length == 1) return exactCodeMatch;
-        if (exactCodeMatch.length > 1) return exactCodeMatch;
-
+        if (exactCodeMatch.length >= 1) return exactCodeMatch;
         final List<QueryDocumentSnapshot> suggestions = _listaDeProdutos.where((option) {
           final data = option.data() as Map<String, dynamic>;
           final nome = (data['nome'] ?? '').toLowerCase();
           final codigo = (data['codigo'] ?? '').toLowerCase();
           return codigo.startsWith(query) || nome.startsWith(query);
         }).toList();
-
         suggestions.sort((a, b) {
           final dataA = a.data() as Map<String, dynamic>;
           final codigoA = (dataA['codigo'] ?? '').toLowerCase();
@@ -427,16 +424,14 @@ class _TelaCriarRequisicaoState extends State<TelaCriarRequisicao> {
         return suggestions;
       },
       onSelected: (selection) {
-        print("DEBUG: Item selecionado via onSelected: ${selection.id}");
-        _produtoSelecionadoParaAdicionar = selection; // Guarda a seleção
-        // O Autocomplete já atualiza o textEditingController interno.
-        // O listener que adicionamos no fieldViewBuilder atualizará o nosso _produtoAutocompleteController.
-        FocusScope.of(context).nextFocus(); // Move o foco para Quantidade
+        _produtoSelecionadoParaAdicionar = selection;
+        FocusScope.of(context).nextFocus();
       },
     );
   }
 
   Widget _buildCampoQuantidade() {
+    // (Idêntico)
     return TextFormField(
       controller: _qtdController,
       decoration: const InputDecoration(labelText: 'Quantidade', border: OutlineInputBorder()),
@@ -448,11 +443,12 @@ class _TelaCriarRequisicaoState extends State<TelaCriarRequisicao> {
         if (valor <= 0) return 'A quantidade deve ser maior que zero';
         return null;
       },
-      onFieldSubmitted: (_) => _adicionarItemNaLista(), // Aperta Enter aqui, adiciona o item
+      onFieldSubmitted: (_) => _adicionarItemNaLista(),
     );
   }
 
   Widget _buildListaItensRequisicao() {
+    // (Idêntico)
     if (_itensDaRequisicao.isEmpty) {
       return const Center(
         child: Padding(
@@ -464,12 +460,9 @@ class _TelaCriarRequisicaoState extends State<TelaCriarRequisicao> {
         ),
       );
     }
-
-    // Usamos ListView.builder diretamente, sem Container com altura fixa
-    // pois o pai já é um ListView que permite rolar.
     return ListView.builder(
-      shrinkWrap: true, // Importante para estar dentro de outro ListView
-      physics: const NeverScrollableScrollPhysics(), // Impede scroll interno
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
       itemCount: _itensDaRequisicao.length,
       itemBuilder: (context, index) {
         final item = _itensDaRequisicao[index];
@@ -505,7 +498,12 @@ class _TelaCriarRequisicaoState extends State<TelaCriarRequisicao> {
       hint: const Text('Destino / Motivo'),
       isExpanded: true,
       items: _subtiposSaida.map((String v) => DropdownMenuItem<String>(value: v, child: Text(v))).toList(),
-      onChanged: (v) => setState(() => _subtipoSelecionado = v),
+      onChanged: (v) => setState(() {
+        _subtipoSelecionado = v;
+        // ---> MUDANÇA 6: Limpar seleção de cliente ao mudar o tipo
+        _parceiroDocSelecionado = null;
+        _parceiroAutocompleteController.clear();
+      }),
       validator: (v) => v == null ? 'Selecione uma opção' : null,
       decoration: const InputDecoration(border: OutlineInputBorder()),
     );
@@ -520,8 +518,70 @@ class _TelaCriarRequisicaoState extends State<TelaCriarRequisicao> {
     );
   }
 
+  // ---> MUDANÇA 7: Novo widget para selecionar cliente
+  Widget _buildParceiroAutocomplete() {
+    return Autocomplete<QueryDocumentSnapshot>(
+      displayStringForOption: (option) => (option.data() as Map<String, dynamic>)['nome'] ?? '',
+      fieldViewBuilder: (context, textEditingController, focusNode, onFieldSubmitted) {
+        // Sincroniza os controllers
+        textEditingController.addListener(() {
+          _parceiroAutocompleteController.text = textEditingController.text;
+        });
+        if (_parceiroAutocompleteController.text.isNotEmpty && textEditingController.text.isEmpty) {
+          textEditingController.text = _parceiroAutocompleteController.text;
+        }
+
+        return TextFormField(
+          controller: textEditingController,
+          focusNode: focusNode,
+          decoration: InputDecoration(
+            labelText: 'Cliente',
+            border: const OutlineInputBorder(),
+            suffixIcon: IconButton(
+              icon: const Icon(Icons.clear),
+              onPressed: () {
+                textEditingController.clear();
+                _parceiroAutocompleteController.clear();
+                setState(() => _parceiroDocSelecionado = null);
+              },
+            ),
+          ),
+          validator: (value) {
+            // Obrigatório para estes tipos
+            if (value == null || value.isEmpty) return 'O cliente é obrigatório.';
+            // Se digitou algo mas não selecionou da lista
+            if (_parceiroDocSelecionado == null) return 'Selecione um cliente válido.';
+            return null;
+          },
+        );
+      },
+      optionsBuilder: (TextEditingValue textEditingValue) {
+        final query = textEditingValue.text.toLowerCase();
+        if (query.isEmpty) return const Iterable<QueryDocumentSnapshot>.empty();
+        // Filtra da lista de clientes que já carregamos
+        return _listaDeClientes.where((option) {
+          final data = option.data() as Map<String, dynamic>;
+          final nome = (data['nome'] ?? '').toLowerCase();
+          final codigo = (data['codigo'] ?? '').toLowerCase();
+          return nome.contains(query) || codigo.contains(query);
+        });
+      },
+      onSelected: (selection) {
+        FocusScope.of(context).unfocus();
+        setState(() { _parceiroDocSelecionado = selection; });
+        _parceiroAutocompleteController.text = (selection.data() as Map<String, dynamic>)['nome'] ?? '';
+      },
+    );
+  }
+
+  // ---> MUDANÇA 8: Adicionar o campo de cliente nos tipos corretos
   Widget _buildCamposCondicionais() {
     if (_subtipoSelecionado == null) return const SizedBox.shrink();
+
+    // Campos que precisam de Cliente
+    final bool precisaCliente = _subtipoSelecionado == 'OS' ||
+        _subtipoSelecionado == 'Venda (NF)' ||
+        _subtipoSelecionado == 'Venda (Pedido)';
 
     return Wrap(
       runSpacing: 16,
@@ -560,9 +620,15 @@ class _TelaCriarRequisicaoState extends State<TelaCriarRequisicao> {
             decoration: const InputDecoration(labelText: 'Nome do Colaborador', border: OutlineInputBorder()),
             textCapitalization: TextCapitalization.characters,
           ),
+
+        // Adiciona o campo de cliente se necessário
+        if (precisaCliente)
+          _buildParceiroAutocomplete(),
+
+        // Adiciona o Centro de Custo para (quase) todos
         if (_subtipoSelecionado != null)
           _buildCampoCentroDeCusto(),
       ],
     );
   }
-} // FIM DA CLASSE
+}

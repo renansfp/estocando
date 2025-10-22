@@ -1,4 +1,4 @@
-// CÓDIGO COMPLETO - models/requisicao.dart (v. 20/10/2025 - com motivoCancelamento)
+// CÓDIGO COMPLETO - models/requisicao.dart (v. 22/10/2025 - com nomeCliente)
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 
@@ -26,12 +26,11 @@ class ItemRequisicao {
   }
 
   factory ItemRequisicao.fromJson(Map<String, dynamic> json) {
-    // Adiciona verificação para campos que podem ser nulos em dados antigos
     return ItemRequisicao(
-      produtoId: json['produtoId'] as String? ?? 'ID_INVALIDO', // Valor padrão se nulo
-      produtoCodigo: json['produtoCodigo'] as String? ?? 'N/A', // Valor padrão se nulo
-      produtoNome: json['produtoNome'] as String? ?? 'Nome Inválido', // Valor padrão se nulo
-      quantidadeSolicitada: (json['quantidadeSolicitada'] as num? ?? 0).toDouble(), // Valor padrão se nulo
+      produtoId: json['produtoId'] as String? ?? 'ID_INVALIDO',
+      produtoCodigo: json['produtoCodigo'] as String? ?? 'N/A',
+      produtoNome: json['produtoNome'] as String? ?? 'Nome Inválido',
+      quantidadeSolicitada: (json['quantidadeSolicitada'] as num? ?? 0).toDouble(),
     );
   }
 }
@@ -53,13 +52,16 @@ class Requisicao {
   final String? centroDeCusto;
   final String? numeroPedido;
   final String? numeroNF;
-  final String? agencia; // Renomeado de numeroAG para agencia para consistência
+  final String? agencia;
+
+  // ---> MUDANÇA 1: Adicionamos o campo do cliente aqui <---
+  final String? nomeCliente;
 
   // Campos de Atendimento/Cancelamento
-  final String? atendidoPorId; // Pode ser quem atendeu OU quem cancelou
-  final String? atendidoPorNome; // Pode ser quem atendeu OU quem cancelou
-  final DateTime? dataAtendimento; // Pode ser a data do atendimento OU do cancelamento
-  final String? motivoCancelamento; // Motivo se o status for "CANCELADO"
+  final String? atendidoPorId;
+  final String? atendidoPorNome;
+  final DateTime? dataAtendimento;
+  final String? motivoCancelamento;
 
   Requisicao({
     this.id,
@@ -69,7 +71,6 @@ class Requisicao {
     required this.dataSolicitacao,
     required this.status,
     required this.itens,
-
     required this.subTipo,
     this.numeroOS,
     this.nomeColaborador,
@@ -77,6 +78,9 @@ class Requisicao {
     this.numeroPedido,
     this.numeroNF,
     this.agencia,
+
+    // ---> MUDANÇA 2: Adicionamos ao construtor <---
+    this.nomeCliente,
 
     this.atendidoPorId,
     this.atendidoPorNome,
@@ -92,7 +96,6 @@ class Requisicao {
       'dataSolicitacao': Timestamp.fromDate(dataSolicitacao),
       'status': status,
       'itens': itens.map((item) => item.toJson()).toList(),
-
       'subTipo': subTipo,
       'numeroOS': numeroOS,
       'nomeColaborador': nomeColaborador,
@@ -100,6 +103,9 @@ class Requisicao {
       'numeroPedido': numeroPedido,
       'numeroNF': numeroNF,
       'agencia': agencia,
+
+      // ---> MUDANÇA 3: Adicionamos ao JSON <---
+      'nomeCliente': nomeCliente,
 
       'atendidoPorId': atendidoPorId,
       'atendidoPorNome': atendidoPorNome,
@@ -109,34 +115,32 @@ class Requisicao {
   }
 
   factory Requisicao.fromFirestore(DocumentSnapshot doc) {
-    final data = doc.data() as Map<String, dynamic>? ?? {}; // Garante que data não seja nulo
+    final data = doc.data() as Map<String, dynamic>? ?? {};
 
-    // Converte a lista de Maps de volta para uma lista de Objetos ItemRequisicao
-    // Adiciona verificação para 'itens' nulo ou não ser uma lista
     final List<dynamic> itensData = data['itens'] is List ? data['itens'] as List<dynamic> : [];
     final List<ItemRequisicao> itensLista = itensData
-        .where((itemData) => itemData is Map<String, dynamic>) // Filtra itens inválidos
+        .where((itemData) => itemData is Map<String, dynamic>)
         .map((itemData) => ItemRequisicao.fromJson(itemData as Map<String, dynamic>))
         .toList();
 
     return Requisicao(
       id: doc.id,
-      // Adiciona valores padrão para campos obrigatórios caso não existam (segurança extra)
       empresaId: data['empresaId'] as String? ?? 'EMPRESA_INVALIDA',
       solicitanteId: data['solicitanteId'] as String? ?? 'USER_INVALIDO',
       solicitanteNome: data['solicitanteNome'] as String? ?? 'Nome Inválido',
-      dataSolicitacao: (data['dataSolicitacao'] as Timestamp?)?.toDate() ?? DateTime.now(), // Usa data atual se nulo
+      dataSolicitacao: (data['dataSolicitacao'] as Timestamp?)?.toDate() ?? DateTime.now(),
       status: data['status'] as String? ?? 'INVALIDO',
-
       itens: itensLista,
-
-      subTipo: data['subTipo'] as String? ?? 'OS', // Define 'OS' como padrão se não existir
+      subTipo: data['subTipo'] as String? ?? 'OS',
       numeroOS: data['numeroOS'] as String?,
       nomeColaborador: data['nomeColaborador'] as String?,
       centroDeCusto: data['centroDeCusto'] as String?,
       numeroPedido: data['numeroPedido'] as String?,
       numeroNF: data['numeroNF'] as String?,
       agencia: data['agencia'] as String?,
+
+      // ---> MUDANÇA 4: Adicionamos ao FromFirestore <---
+      nomeCliente: data['nomeCliente'] as String?,
 
       atendidoPorId: data['atendidoPorId'] as String?,
       atendidoPorNome: data['atendidoPorNome'] as String?,

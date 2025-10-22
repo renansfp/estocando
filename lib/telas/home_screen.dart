@@ -1,4 +1,4 @@
-// Salve este arquivo como: telas/home_screen.dart (VERSÃO SEM BOTÃO FLUTUANTE)
+// Salve este arquivo como: telas/home_screen.dart (v. 22/10/2025 - COM BADGE DE NOTIFICAÇÃO)
 
 import 'package:estocando/telas/tela_criar_requisicao.dart';
 import 'package:estocando/telas/tela_requisicoes_pendentes.dart';
@@ -7,9 +7,6 @@ import 'package:flutter/material.dart';
 import 'package:estocando/telas/tela_lista_produtos.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-
-// ---> MUDANÇA 1: O SpeedDial não é mais necessário <---
-// import 'package:flutter_speed_dial/flutter_speed_dial.dart';
 
 // Imports para o Drawer e Ações
 import 'package:estocando/telas/tela_aprovacao_usuarios.dart';
@@ -87,7 +84,7 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-
+  // (As funções de navegação permanecem as mesmas)
   @override
   void dispose() {
     _buscaController.dispose();
@@ -98,35 +95,19 @@ class _HomeScreenState extends State<HomeScreen> {
     if (Navigator.of(context).canPop()) {
       Navigator.of(context).pop();
     }
-
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (context) => TelaListaProdutos(
-          termoBuscaInicial: termoBuscado,
-        ),
-      ),
-    );
-
+    Navigator.push( context, MaterialPageRoute( builder: (context) => TelaListaProdutos( termoBuscaInicial: termoBuscado, ), ), );
     _buscaController.clear();
     FocusScope.of(context).unfocus();
   }
 
   void _irParaCriarRequisicao() {
-    Navigator.push(
-      context,
-      MaterialPageRoute(builder: (context) => const TelaCriarRequisicao()),
-    );
+    Navigator.push( context, MaterialPageRoute(builder: (context) => const TelaCriarRequisicao()), );
   }
 
   void _irParaRequisicoesPendentes() {
-    Navigator.push(
-      context,
-      MaterialPageRoute(builder: (context) => const TelaRequisicoesPendentes()),
-    );
+    Navigator.push( context, MaterialPageRoute(builder: (context) => const TelaRequisicoesPendentes()), );
   }
 
-  // ---> MUDANÇA 2: Criamos funções de navegação para os novos botões <---
   void _irParaNovaMovimentacao() {
     Navigator.push(context, MaterialPageRoute(builder: (c) => const TelaMovimentacao()));
   }
@@ -155,13 +136,9 @@ class _HomeScreenState extends State<HomeScreen> {
           ? const Drawer(child: Center(child: CircularProgressIndicator()))
           : _buildDrawer(),
 
-      // ---> MUDANÇA 3: O floatingActionButton foi removido <---
-      // floatingActionButton: ...
-
-      // ---> MUDANÇA 4: O body agora é um ListView para evitar overflow <---
       body: _carregandoDadosIniciais
           ? const Center(child: CircularProgressIndicator())
-          : ListView( // Usamos ListView para rolar a tela se houver muitos botões
+          : ListView(
         padding: const EdgeInsets.all(16.0),
         children: [
           _buildCampoBusca(),
@@ -173,7 +150,6 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
           const SizedBox(height: 16),
 
-          // Botão de Criar Requisição (Produção ou Admin)
           if (isProducao || isAdmin) ...[
             _buildBotaoAcessoRapido(
               contexto: context,
@@ -186,22 +162,37 @@ class _HomeScreenState extends State<HomeScreen> {
             const SizedBox(height: 12),
           ],
 
-          // Botão "Requisições Pendentes" (Admin ou Almoxarife)
+          // ---> MUDANÇA (BADGE): Botão de Requisições Pendentes agora é envolvido por um StreamBuilder <---
           if (isAdmin || isAlmoxarife) ...[
-            _buildBotaoAcessoRapido(
-              contexto: context,
-              icone: Icons.pending_actions,
-              titulo: 'Requisições Pendentes',
-              subtitulo: 'Aprovar ou reprovar pedidos',
-              cor: Colors.orangeAccent,
-              onPressed: _irParaRequisicoesPendentes,
+            StreamBuilder<QuerySnapshot>(
+              // O Stream ouve o Firestore em tempo real
+              stream: FirebaseFirestore.instance
+                  .collection('requisicoes')
+                  .where('empresaId', isEqualTo: _empresaId)
+                  .where('status', isEqualTo: 'PENDENTE')
+                  .limit(1) // Só precisamos saber se existe *pelo menos uma*
+                  .snapshots(),
+              builder: (context, snapshot) {
+                // Verifica se a consulta retornou algum documento
+                final bool temPendentes = (snapshot.hasData && snapshot.data!.docs.isNotEmpty);
+
+                return _buildBotaoAcessoRapido(
+                  contexto: context,
+                  icone: Icons.pending_actions,
+                  titulo: 'Requisições Pendentes',
+                  subtitulo: 'Aprovar ou reprovar pedidos',
+                  cor: Colors.orangeAccent,
+                  onPressed: _irParaRequisicoesPendentes,
+                  showBadge: temPendentes, // <--- Passa a informação para o widget
+                );
+              },
             ),
             const SizedBox(height: 12),
           ],
 
-          // ---> MUDANÇA 5: Nova seção "Cadastros e Ações" <---
+          // Seção "Cadastros e Ações" (sem alterações)
           if (isAdmin || isAlmoxarife) ...[
-            const SizedBox(height: 20), // Espaço extra
+            const SizedBox(height: 20),
             Text(
               'Cadastros e Ações',
               style: Theme.of(context).textTheme.titleLarge,
@@ -238,11 +229,12 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
           ],
         ],
-       ),
+      ),
     );
   }
 
   Widget _buildCampoBusca() {
+    // (Idêntico)
     return TextFormField(
       controller: _buscaController,
       decoration: InputDecoration(
@@ -262,6 +254,7 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  // ---> MUDANÇA (BADGE): O widget do botão agora aceita 'showBadge' <---
   Widget _buildBotaoAcessoRapido({
     required BuildContext contexto,
     required IconData icone,
@@ -269,6 +262,7 @@ class _HomeScreenState extends State<HomeScreen> {
     required String subtitulo,
     required Color cor,
     required VoidCallback onPressed,
+    bool showBadge = false, // <-- Novo parâmetro opcional
   }) {
     return Card(
       elevation: 2,
@@ -280,28 +274,52 @@ class _HomeScreenState extends State<HomeScreen> {
         borderRadius: BorderRadius.circular(12.0),
         child: Padding(
           padding: const EdgeInsets.all(16.0),
-          child: Row(
+          // Usamos um Stack para sobrepor o "badge"
+          child: Stack(
+            clipBehavior: Clip.none, // Permite o badge sair do card
             children: [
-              Icon(icone, size: 40, color: cor),
-              const SizedBox(width: 16),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      titulo,
-                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.bold,
-                      ),
+              Row(
+                children: [
+                  Icon(icone, size: 40, color: cor),
+                  const SizedBox(width: 16),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          titulo,
+                          style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        Text(
+                          subtitulo,
+                          style: Theme.of(context).textTheme.bodySmall,
+                        ),
+                      ],
                     ),
-                    Text(
-                      subtitulo,
-                      style: Theme.of(context).textTheme.bodySmall,
-                    ),
-                  ],
-                ),
+                  ),
+                  const Icon(Icons.chevron_right, color: Colors.grey),
+                ],
               ),
-              const Icon(Icons.chevron_right, color: Colors.grey),
+              // ---> MUDANÇA (BADGE): Lógica para mostrar o "ponto vermelho" <---
+              if (showBadge)
+                Positioned(
+                  top: -8,
+                  right: -4,
+                  child: Container(
+                    padding: const EdgeInsets.all(2),
+                    decoration: BoxDecoration(
+                      color: Theme.of(context).colorScheme.secondary, // Vermelho Protecin
+                      shape: BoxShape.circle,
+                      border: Border.all(color: Colors.white, width: 2),
+                    ),
+                    constraints: const BoxConstraints(
+                      minWidth: 12,
+                      minHeight: 12,
+                    ),
+                  ),
+                ),
             ],
           ),
         ),
@@ -309,6 +327,7 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  // (O _buildDrawer() permanece idêntico ao da v4)
   Widget _buildDrawer() {
 
     final String? permissao = _permissaoUsuario;
@@ -337,14 +356,14 @@ class _HomeScreenState extends State<HomeScreen> {
             leading: const Icon(Icons.home),
             title: const Text('Início (Dashboard)'),
             onTap: () {
-              Navigator.of(context).pop(); // Fecha o drawer
+              Navigator.of(context).pop();
             },
           ),
 
           ListTile(
             leading: const Icon(Icons.inventory_2),
             title: const Text('Lista de Produtos'),
-            onTap: () => _irParaListaDeProdutos(null), // Vai para a lista sem filtro
+            onTap: () => _irParaListaDeProdutos(null),
           ),
 
           if (isAdmin || isAlmoxarife) ...[
@@ -464,7 +483,4 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
     );
   }
-
-// ---> MUDANÇA 6: A função _buildSpeedDial foi completamente REMOVIDA <---
-// SpeedDial _buildSpeedDial(BuildContext context, String permissao) { ... }
 }
