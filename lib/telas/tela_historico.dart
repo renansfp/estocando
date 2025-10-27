@@ -4,6 +4,12 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'dart:io';
+import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:universal_html/html.dart' as html;
+import 'package:excel/excel.dart' hide Border; // Usamos 'hide Border' para evitar conflito
+import 'package:path_provider/path_provider.dart';
+import 'package:share_plus/share_plus.dart';
 
 class _ProdutoValor {
   final String nome;
@@ -14,6 +20,7 @@ class _ProdutoValor {
 class ProdutoComEstoqueHistorico {
   final String codigo;
   final String nome;
+  final String? ncm;
   final double quantidade;
   final double custoUnitario;
   final double custoTotal;
@@ -21,6 +28,7 @@ class ProdutoComEstoqueHistorico {
   ProdutoComEstoqueHistorico({
     required this.codigo,
     required this.nome,
+    this.ncm,
     required this.quantidade,
     required this.custoUnitario,
   }) : custoTotal = quantidade * custoUnitario;
@@ -125,6 +133,7 @@ class _TelaRelatoriosState extends State<TelaRelatorios> {
           ProdutoComEstoqueHistorico(
             codigo: pData['codigo'] ?? 'N/A',
             nome: pData['nome'] ?? 'N/A',
+            ncm: pData['ncm'],
             quantidade: quantidadeHistorica,
             custoUnitario: (pData['valor'] ?? 0.0).toDouble(),
           ),
@@ -283,6 +292,7 @@ class _TelaRelatoriosState extends State<TelaRelatorios> {
         return ProdutoComEstoqueHistorico(
           codigo: pData['codigo'] ?? 'N/A',
           nome: pData['nome'] ?? 'N/A',
+          ncm: pData['ncm'],
           quantidade: (pData['quantidadeAtual'] ?? 0).toDouble(),
           custoUnitario: (pData['valor'] ?? 0.0).toDouble(),
         );
@@ -410,7 +420,7 @@ class _TelaRelatoriosState extends State<TelaRelatorios> {
                                         ]
                                     )
                                 )
-                            ).toList(),
+                            ),
                             const Divider(height: 20, thickness: 1.5),
                             Padding(
                               padding: const EdgeInsets.only(top: 8.0),
@@ -430,6 +440,7 @@ class _TelaRelatoriosState extends State<TelaRelatorios> {
                     ],
                   ),
                 ),
+
                 const SizedBox(height: 16),
                 _buildCardRelatorio(
                   titulo: 'Saídas para Itaú (Consumo Interno)',
@@ -559,6 +570,20 @@ class _TelaRelatoriosState extends State<TelaRelatorios> {
                         )
                       else
                         const Text('Nenhum item de revenda em estoque para esta data.'),
+                      if ((relatorioRevenda['itensRevenda'] as List).isNotEmpty) ...[
+                        const SizedBox(height: 16),
+                        ElevatedButton.icon(
+                          icon: const Icon(Icons.file_download),
+                          label: const Text('Exportar Itens de Revenda'),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.green.shade700,
+                            foregroundColor: Colors.white,
+                          ),
+                          onPressed: () {
+                            _exportarEstoqueRevenda(relatorioRevenda['itensRevenda'] as List<ProdutoComEstoqueHistorico>);
+                          },
+                        ),
+                      ],
                     ],
                   ),
                 ),
@@ -590,6 +615,7 @@ class _TelaRelatoriosState extends State<TelaRelatorios> {
         columns: const [
           DataColumn(label: Text('Código', style: TextStyle(fontWeight: FontWeight.bold))),
           DataColumn(label: Text('Produto', style: TextStyle(fontWeight: FontWeight.bold))),
+          DataColumn(label: Text('NCM', style: TextStyle(fontWeight: FontWeight.bold))),
           DataColumn(label: Text('Qtd.', style: TextStyle(fontWeight: FontWeight.bold)), numeric: true),
           DataColumn(label: Text('Custo Unit.', style: TextStyle(fontWeight: FontWeight.bold)), numeric: true),
           DataColumn(label: Text('Custo Total', style: TextStyle(fontWeight: FontWeight.bold)), numeric: true),
@@ -599,6 +625,7 @@ class _TelaRelatoriosState extends State<TelaRelatorios> {
             cells: [
               DataCell(Text(produto.codigo)),
               DataCell(Text(produto.nome)),
+              DataCell(Text(produto.ncm ?? '-')),
               DataCell(Text(produto.quantidade.toStringAsFixed(3).replaceAll('.', ','))),
               DataCell(Text(formatoMoeda.format(produto.custoUnitario))),
               DataCell(Text(formatoMoeda.format(produto.custoTotal))),
@@ -648,5 +675,75 @@ class _TelaRelatoriosState extends State<TelaRelatorios> {
           ),
       ],
     );
+  }
+  Future<void> _exportarEstoqueRevenda(List<ProdutoComEstoqueHistorico> itensRevenda) async {
+    final scaffoldMessenger = ScaffoldMessenger.of(context);
+    if (itensRevenda.isEmpty) {
+      scaffoldMessenger.showSnackBar(const SnackBar(
+        content: Text('Nenhum item de revenda para exportar.'),
+        backgroundColor: Colors.orange,
+      ));
+      return;
+    }
+
+    try {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Gerando Excel... Por favor, aguarde.'),
+        backgroundColor: Colors.blue,
+      ));
+
+      var excel = Excel.createExcel();
+      Sheet sheetObject = excel['Estoque Revenda'];
+
+      // Cabeçalho
+      List<String> headers = ['Código', 'Nome', 'NCM', 'Quantidade', 'Custo Unitário', 'Custo Total'];
+      sheetObject.appendRow(headers.map((header) => TextCellValue(header)).toList());
+
+      final formatadorMoeda = NumberFormat.currency(locale: 'pt_BR', symbol: 'R\$');
+
+      // Dados
+      for (var item in itensRevenda) {
+        List<CellValue> row = [
+          TextCellValue(item.codigo),
+          TextCellValue(item.nome),
+          TextCellValue(item.ncm ?? '-'),
+          DoubleCellValue(item.quantidade),
+          TextCellValue(formatadorMoeda.format(item.custoUnitario)), // Salva como texto formatado
+          TextCellValue(formatadorMoeda.format(item.custoTotal)), // Salva como texto formatado
+        ];
+        sheetObject.appendRow(row);
+      }
+
+      final timestamp = DateFormat('yyyyMMdd_HHmmss').format(DateTime.now());
+      final fileName = 'Estocando_Revenda_$timestamp.xlsx';
+      var fileBytes = excel.save();
+
+      if (kIsWeb) {
+        if (fileBytes != null) {
+          final blob = html.Blob([fileBytes], 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+          final url = html.Url.createObjectUrlFromBlob(blob);
+          html.AnchorElement(href: url)
+            ..setAttribute("download", fileName)
+            ..click();
+          html.Url.revokeObjectUrl(url);
+        }
+      } else {
+        if (fileBytes != null) {
+          final directory = await getTemporaryDirectory();
+          final filePath = '${directory.path}/$fileName';
+          File(filePath)
+            ..createSync(recursive: true)
+            ..writeAsBytesSync(fileBytes);
+          await Share.shareXFiles([XFile(filePath)], text: 'Relatório de Estoque de Revenda - Estocando');
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('Erro ao exportar: $e'),
+          backgroundColor: Colors.red,
+        ));
+      }
+    }
   }
 }

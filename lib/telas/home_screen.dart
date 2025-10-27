@@ -3,7 +3,6 @@
 import 'package:estocando/telas/tela_criar_requisicao.dart';
 import 'package:estocando/telas/tela_requisicoes_pendentes.dart';
 import 'package:flutter/material.dart';
-
 import 'package:estocando/telas/tela_lista_produtos.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -21,6 +20,14 @@ import 'package:estocando/telas/tela_cadastro_produto.dart';
 import 'package:estocando/telas/tela_movimentacao.dart';
 import 'package:estocando/telas/tela_cadastro_parceiro.dart';
 
+// Imports que precisamos adicionar para a função de exportar
+import 'dart:io';
+import 'package:flutter/foundation.dart';
+import 'package:universal_html/html.dart' as html;
+import 'package:intl/intl.dart';
+import 'package:excel/excel.dart' hide Border;
+import 'package:path_provider/path_provider.dart';
+import 'package:share_plus/share_plus.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -232,6 +239,49 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
     );
   }
+  Future<void> _exportarProdutosParaExcel() async {
+    // (O código desta função permanece o mesmo da sua tela_home.dart original)
+    try {
+      if (_empresaId == null) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar( content: Text('Erro: ID da empresa não encontrado. Tente novamente.'), backgroundColor: Colors.red, ));
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar( content: Text('Gerando relatório... Por favor, aguarde.'), backgroundColor: Colors.blue, ));
+      final querySnapshot = await FirebaseFirestore.instance .collection('produtos') .where('empresaId', isEqualTo: _empresaId) .orderBy('nome') .get();
+      final produtos = querySnapshot.docs;
+      var excel = Excel.createExcel();
+      Sheet sheetObject = excel['Produtos'];
+      List<String> headers = ['Código', 'Nome', 'Quantidade Atual', 'Estoque Mínimo', 'Estoque Máximo', 'Valor Unitário', 'Número SC', 'Ativo'];
+      sheetObject.appendRow(headers.map((header) => TextCellValue(header)).toList());
+      for (var doc in produtos) {
+        final data = doc.data();
+        List<CellValue> row = [ TextCellValue(data['codigo'] ?? ''), TextCellValue(data['nome'] ?? ''), DoubleCellValue((data['quantidadeAtual'] ?? 0.0).toDouble()), DoubleCellValue((data['estoqueMinimo'] ?? 0.0).toDouble()), DoubleCellValue((data['estoqueMaximo'] ?? 0.0).toDouble()), DoubleCellValue((data['valor'] ?? 0.0).toDouble()), TextCellValue(data['numeroSC'] ?? ''), TextCellValue(data['ativo'] == true ? 'Sim' : 'Não'), ];
+        sheetObject.appendRow(row);
+      }
+      final timestamp = DateFormat('yyyyMMdd_HHmmss').format(DateTime.now());
+      final fileName = 'Estocando_Produtos_$timestamp.xlsx';
+      var fileBytes = excel.save();
+      if (kIsWeb) {
+        if (fileBytes != null) {
+          final blob = html.Blob([fileBytes], 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+          final url = html.Url.createObjectUrlFromBlob(blob);
+          final anchor = html.AnchorElement(href: url) ..setAttribute("download", fileName) ..click();
+          html.Url.revokeObjectUrl(url);
+        }
+      } else {
+        if (fileBytes != null) {
+          final directory = await getTemporaryDirectory();
+          final filePath = '${directory.path}/$fileName';
+          File(filePath) ..createSync(recursive: true) ..writeAsBytesSync(fileBytes);
+          await Share.shareXFiles([XFile(filePath)], text: 'Relatório de Produtos - Estocando');
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar( content: Text('Erro ao exportar: $e'), backgroundColor: Colors.red, ));
+      }
+    }
+  }
 
   Widget _buildCampoBusca() {
     // (Idêntico)
@@ -389,6 +439,14 @@ class _HomeScreenState extends State<HomeScreen> {
               onTap: () {
                 Navigator.pop(context);
                 Navigator.push(context, MaterialPageRoute(builder: (c) => const TelaRelatorios()));
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.file_download), // Ícone de exportar
+              title: const Text('Exportar Produtos (Excel)'),
+              onTap: () {
+                Navigator.pop(context); // Fecha o menu
+                _exportarProdutosParaExcel(); // Chama a função que você colou
               },
             ),
           ],

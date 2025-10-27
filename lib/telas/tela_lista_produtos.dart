@@ -2,30 +2,13 @@
 // (Este é o seu código da tela_home.dart, mas modificado com a BUSCA CORRIGIDA)
 
 import 'dart:async';
-import 'dart:io';
-import 'package:estocando/telas/tela_gerenciar_movimentacoes.dart';
-import 'package:estocando/telas/tela_historico.dart';
 import 'package:estocando/models/movimentacao.dart';
-import 'package:flutter/foundation.dart';
-import 'package:universal_html/html.dart' as html;
-import 'package:estocando/telas/tela_aprovacao_usuarios.dart';
-import 'package:estocando/telas/tela_cadastro_parceiro.dart';
-import 'package:estocando/telas/tela_extrato_movimentacoes.dart';
-import 'package:estocando/telas/tela_importacao_movimentacoes.dart';
-import 'package:estocando/telas/tela_importacao_parceiros.dart';
-import 'package:estocando/telas/tela_importacao_produtos.dart';
 import 'package:estocando/telas/tela_movimentacao.dart';
-import 'package:estocando/telas/tela_parceiros.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:intl/intl.dart';
 import 'tela_cadastro_produto.dart';
-import 'package:estocando/telas/tela_criar_requisicao.dart';
-import 'package:estocando/telas/tela_requisicoes_pendentes.dart';
-import 'package:excel/excel.dart';
-import 'package:path_provider/path_provider.dart';
-import 'package:share_plus/share_plus.dart';
 
 enum FiltroProdutos { ativos, inativos, todos, pontoDePedido }
 enum AcoesProduto { editar, solicitarCompra, excluir }
@@ -49,6 +32,8 @@ class _TelaListaProdutosState extends State<TelaListaProdutos> {
   String? _permissaoUsuario; // 'admin', 'almoxarife', 'producao'
   String? _empresaId;
   bool _carregandoDadosIniciais = true;
+  final List<String> _gruposDeProduto = const ['CONSUMO', "EPI'S", 'MATERIA PRIMA', 'REVENDA'];
+  String? _grupoFiltroSelecionado;
 
   @override
   void initState() {
@@ -113,50 +98,6 @@ class _TelaListaProdutosState extends State<TelaListaProdutos> {
     super.dispose();
   }
 
-  Future<void> _exportarProdutosParaExcel() async {
-    // (O código desta função permanece o mesmo da sua tela_home.dart original)
-    try {
-      if (_empresaId == null) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar( content: Text('Erro: ID da empresa não encontrado. Tente novamente.'), backgroundColor: Colors.red, ));
-        return;
-      }
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar( content: Text('Gerando relatório... Por favor, aguarde.'), backgroundColor: Colors.blue, ));
-      final querySnapshot = await FirebaseFirestore.instance .collection('produtos') .where('empresaId', isEqualTo: _empresaId) .orderBy('nome') .get();
-      final produtos = querySnapshot.docs;
-      var excel = Excel.createExcel();
-      Sheet sheetObject = excel['Produtos'];
-      List<String> headers = ['Código', 'Nome', 'Quantidade Atual', 'Estoque Mínimo', 'Estoque Máximo', 'Valor Unitário', 'Número SC', 'Ativo'];
-      sheetObject.appendRow(headers.map((header) => TextCellValue(header)).toList());
-      for (var doc in produtos) {
-        final data = doc.data();
-        List<CellValue> row = [ TextCellValue(data['codigo'] ?? ''), TextCellValue(data['nome'] ?? ''), DoubleCellValue((data['quantidadeAtual'] ?? 0.0).toDouble()), DoubleCellValue((data['estoqueMinimo'] ?? 0.0).toDouble()), DoubleCellValue((data['estoqueMaximo'] ?? 0.0).toDouble()), DoubleCellValue((data['valor'] ?? 0.0).toDouble()), TextCellValue(data['numeroSC'] ?? ''), TextCellValue(data['ativo'] == true ? 'Sim' : 'Não'), ];
-        sheetObject.appendRow(row);
-      }
-      final timestamp = DateFormat('yyyyMMdd_HHmmss').format(DateTime.now());
-      final fileName = 'Estocando_Produtos_$timestamp.xlsx';
-      var fileBytes = excel.save();
-      if (kIsWeb) {
-        if (fileBytes != null) {
-          final blob = html.Blob([fileBytes], 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-          final url = html.Url.createObjectUrlFromBlob(blob);
-          final anchor = html.AnchorElement(href: url) ..setAttribute("download", fileName) ..click();
-          html.Url.revokeObjectUrl(url);
-        }
-      } else {
-        if (fileBytes != null) {
-          final directory = await getTemporaryDirectory();
-          final filePath = '${directory.path}/$fileName';
-          File(filePath) ..createSync(recursive: true) ..writeAsBytesSync(fileBytes);
-          await Share.shareXFiles([XFile(filePath)], text: 'Relatório de Produtos - Estocando');
-        }
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar( content: Text('Erro ao exportar: $e'), backgroundColor: Colors.red, ));
-      }
-    }
-  }
-
   String _formatarQuantidade(double valor) {
     if (valor == valor.truncate()) {
       return valor.truncate().toString();
@@ -164,7 +105,6 @@ class _TelaListaProdutosState extends State<TelaListaProdutos> {
       return NumberFormat('#,##0.###', 'pt_BR').format(valor);
     }
   }
-
 
   @override
   Widget build(BuildContext context) {
@@ -184,7 +124,9 @@ class _TelaListaProdutosState extends State<TelaListaProdutos> {
     } else if (_filtroAtual == FiltroProdutos.inativos) {
       query = query.where('ativo', isEqualTo: false);
     }
-
+    if (_grupoFiltroSelecionado != null) {
+      query = query.where('grupo', isEqualTo: _grupoFiltroSelecionado);
+    }
     query = query.orderBy('nome');
 
     return Scaffold(
@@ -195,15 +137,15 @@ class _TelaListaProdutosState extends State<TelaListaProdutos> {
           : StreamBuilder<QuerySnapshot>(
         stream: query.snapshots(),
         builder: (context, snapshot) {
-          if (snapshot.hasError)
+          if (snapshot.hasError){
             return const Center(
-                child: Text('Ocorreu um erro ao carregar os produtos.'));
-          if (snapshot.connectionState == ConnectionState.waiting)
-            return const Center(child: CircularProgressIndicator());
-          if (!snapshot.hasData || snapshot.data!.docs.isEmpty)
+                child: Text('Ocorreu um erro ao carregar os produtos.'));}
+          if (snapshot.connectionState == ConnectionState.waiting){
+            return const Center(child: CircularProgressIndicator());}
+          if (!snapshot.hasData || snapshot.data!.docs.isEmpty){
             return const Center(
                 child: Text('Nenhum produto para exibir.',
-                    style: TextStyle(fontSize: 18, color: Colors.grey)));
+                    style: TextStyle(fontSize: 18, color: Colors.grey)));}
 
           List<QueryDocumentSnapshot> produtos = snapshot.data!.docs;
 
@@ -292,14 +234,14 @@ class _TelaListaProdutosState extends State<TelaListaProdutos> {
 
   AppBar _buildAppBar() {
     String titulo = 'Lista de Produtos'; // Título simplificado
-    if (_filtroAtual == FiltroProdutos.pontoDePedido)
-      titulo = 'Ponto de Pedido';
-    else if (_filtroAtual == FiltroProdutos.ativos)
-      titulo = 'Produtos (Ativos)';
-    else if (_filtroAtual == FiltroProdutos.inativos)
-      titulo = 'Produtos (Inativos)';
-    else if (_filtroAtual == FiltroProdutos.todos)
-      titulo = 'Produtos (Todos)';
+    if (_filtroAtual == FiltroProdutos.pontoDePedido){
+      titulo = 'Ponto de Pedido';}
+    else if (_filtroAtual == FiltroProdutos.ativos){
+      titulo = 'Produtos (Ativos)';}
+    else if (_filtroAtual == FiltroProdutos.inativos){
+      titulo = 'Produtos (Inativos)'; }
+    else if (_filtroAtual == FiltroProdutos.todos){
+      titulo = 'Produtos (Todos)';}
 
     if (!_isSearching) {
       return AppBar(
@@ -308,6 +250,32 @@ class _TelaListaProdutosState extends State<TelaListaProdutos> {
           IconButton(
               icon: const Icon(Icons.search),
               onPressed: () => setState(() => _isSearching = true)),
+          PopupMenuButton<String>(
+            icon: Icon(Icons.category, color: _grupoFiltroSelecionado != null ? Colors.blue : Colors.white),
+            tooltip: 'Filtrar por Grupo',
+            onSelected: (String? result) {
+              setState(() {
+                _grupoFiltroSelecionado = (result == 'TODOS') ? null : result;
+              });
+            },
+            itemBuilder: (BuildContext context) {
+              List<PopupMenuEntry<String>> items = [];
+              items.add(
+                const PopupMenuItem(
+                  value: 'TODOS',
+                  child: Text('Todos os Grupos'),
+                ),
+              );
+              items.add(const PopupMenuDivider());
+              items.addAll(
+                _gruposDeProduto.map((String grupo) => PopupMenuItem<String>(
+                  value: grupo,
+                  child: Text(grupo),
+                )),
+              );
+              return items;
+            },
+          ),
           PopupMenuButton<FiltroProdutos>(
             icon: const Icon(Icons.filter_list),
             onSelected: (FiltroProdutos result) =>
@@ -369,7 +337,7 @@ class _TelaListaProdutosState extends State<TelaListaProdutos> {
     final String? numeroSC = data['numeroSC'];
     final double valorUnitario = (data['valor'] ?? 0.0).toDouble();
     final formatoMoeda = NumberFormat.currency(locale: 'pt_BR', symbol: 'R\$');
-    Color statusColor = Theme.of(context).colorScheme.primary.withOpacity(0.7);
+    Color statusColor = Theme.of(context).colorScheme.primary.withAlpha(179);
     String statusText = 'Estoque OK';
     Color textColor = Colors.white;
 
@@ -486,12 +454,12 @@ class _TelaListaProdutosState extends State<TelaListaProdutos> {
   // O _mostrarDialogoSC permanece o mesmo
   void _mostrarDialogoSC(BuildContext context, QueryDocumentSnapshot produtoDoc) {
     final scController = TextEditingController(text: (produtoDoc.data() as Map<String, dynamic>)['numeroSC'] ?? '');
-    showDialog( context: context, builder: (context) { return AlertDialog( title: const Text('Solicitação de Compra'), content: TextField( controller: scController, keyboardType: TextInputType.text, decoration: const InputDecoration(labelText: 'Número da SC'), ), actions: [ TextButton(child: const Text('Cancelar'), onPressed: () => Navigator.of(context).pop()), ElevatedButton( child: const Text('Salvar'), onPressed: () async { await FirebaseFirestore.instance.collection('produtos').doc(produtoDoc.id).update({'numeroSC': scController.text.trim()}); if(mounted) Navigator.of(context).pop(); }, ), ], ); }, );
+    showDialog( context: context, builder: (context) { return AlertDialog( title: const Text('Solicitação de Compra'), content: TextField( controller: scController, keyboardType: TextInputType.text, decoration: const InputDecoration(labelText: 'Número da SC'), ), actions: [ TextButton(child: const Text('Cancelar'), onPressed: () => Navigator.of(context).pop()), ElevatedButton( child: const Text('Salvar'), onPressed: () async { final navigator = Navigator.of(context); await FirebaseFirestore.instance.collection('produtos').doc(produtoDoc.id).update({'numeroSC': scController.text.trim()}); if(mounted) navigator.pop(); }, ), ], ); }, );
   }
 
   // O _mostrarDialogoDeConfirmacao permanece o mesmo
   void _mostrarDialogoDeConfirmacao(BuildContext context, QueryDocumentSnapshot produtoDoc) {
     final nomeProduto = (produtoDoc.data() as Map<String, dynamic>)['nome'] ?? 'este produto';
-    showDialog( context: context, builder: (context) => AlertDialog( title: const Text('Confirmar Exclusão'), content: Text('Tem certeza que deseja excluir "$nomeProduto"?\nEsta ação não pode ser desfeita.'), actions: [ TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Cancelar')), TextButton( child: const Text('Excluir', style: TextStyle(color: Colors.red)), onPressed: () async { await FirebaseFirestore.instance.collection('produtos').doc(produtoDoc.id).delete(); if(mounted) Navigator.of(context).pop(); }, ), ], ), );
+    showDialog( context: context, builder: (context) => AlertDialog( title: const Text('Confirmar Exclusão'), content: Text('Tem certeza que deseja excluir "$nomeProduto"?\nEsta ação não pode ser desfeita.'), actions: [ TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Cancelar')), TextButton( child: const Text('Excluir', style: TextStyle(color: Colors.red)), onPressed: () async { final navigator = Navigator.of(context); await FirebaseFirestore.instance.collection('produtos').doc(produtoDoc.id).delete(); if(mounted) navigator.pop(); }, ), ], ), );
   }
 } // FIM DA CLASSE

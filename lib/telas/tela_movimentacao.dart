@@ -413,11 +413,7 @@ class _TelaMovimentacaoState extends State<TelaMovimentacao> {
             ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Movimentação atualizada com sucesso!'), backgroundColor: Colors.green));
             Navigator.of(context).pop();
           }
-        } catch (e, s) {
-          print('--- ERRO DETALHADO (WEB) ---');
-          print(e);
-          print('--- STACK TRACE ---');
-          print(s);
+        } catch (e) {
 
           if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
@@ -569,28 +565,54 @@ class _TelaMovimentacaoState extends State<TelaMovimentacao> {
   }
 
   Widget _buildTipoMovimentacao() {
+    // Função de "onChanged" que será usada nos dois botões
+    void onChanged(TipoMovimentacao? v) {
+      if (_isEditing) return; // Não faz nada se estiver editando
+      if (v != null) {
+        setState(() {
+          _tipoMovimentacao = v;
+          _limparSelecoesDependentes();
+        });
+      }
+    }
+
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       const Text('Tipo de Movimentação:', style: TextStyle(fontSize: 16)),
       Row(children: [
-        Expanded(child: RadioListTile<TipoMovimentacao>(
-          title: const Text('Entrada'),
-          value: TipoMovimentacao.entrada,
-          groupValue: _tipoMovimentacao,
-          onChanged: _isEditing ? null : (v) { if (v != null) setState(() { _tipoMovimentacao = v; _limparSelecoesDependentes(); }); },
-        )),
-        Expanded(child: RadioListTile<TipoMovimentacao>(
-          title: const Text('Saída'),
-          value: TipoMovimentacao.saida,
-          groupValue: _tipoMovimentacao,
-          onChanged: _isEditing ? null : (v) { if (v != null) setState(() { _tipoMovimentacao = v; _limparSelecoesDependentes(); }); },
-        )),
+        // --- Widget de ENTRADA Corrigido ---
+        Expanded(
+          child: ListTile(
+            title: const Text('Entrada'),
+            leading: Radio<TipoMovimentacao>(
+              value: TipoMovimentacao.entrada,
+              // ignore: deprecated_member_use
+              groupValue: _tipoMovimentacao,
+              // ignore: deprecated_member_use
+              onChanged: onChanged, // Usa a função
+            ),
+            onTap: () => onChanged(TipoMovimentacao.entrada), // Permite clicar na linha toda
+          ),
+        ),
+        // --- Widget de SAÍDA Corrigido ---
+        Expanded(
+          child: ListTile(
+            title: const Text('Saída'),
+            leading: Radio<TipoMovimentacao>(
+              value: TipoMovimentacao.saida,
+              // ignore: deprecated_member_use
+              groupValue: _tipoMovimentacao,
+              // ignore: deprecated_member_use
+              onChanged: onChanged, // Usa a função
+            ),
+            onTap: () => onChanged(TipoMovimentacao.saida), // Permite clicar na linha toda
+          ),
+        ),
       ])
     ]);
   }
-
   Widget _buildSubtipoDropdown() {
     return DropdownButtonFormField<String>(
-        value: _subtipoSelecionado,
+        initialValue: _subtipoSelecionado,
         hint: const Text('Destino / Motivo'),
         isExpanded: true,
         items: (_tipoMovimentacao == TipoMovimentacao.entrada ? _subtiposEntrada : _subtiposSaida)

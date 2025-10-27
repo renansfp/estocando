@@ -49,6 +49,7 @@ class _TelaCadastroProdutoState extends State<TelaCadastroProduto> {
   final _estoqueMinimoController = TextEditingController();
   final _estoqueMaximoController = TextEditingController();
   final _valorController = TextEditingController();
+  final _ncmController = TextEditingController();
 
   String? _tipoSelecionado;
   String? _grupoSelecionado;
@@ -77,6 +78,7 @@ class _TelaCadastroProdutoState extends State<TelaCadastroProduto> {
         _unidadeSelecionada = dados['unidade'];
         _produtoAtivo = dados['ativo'] ?? true;
       });
+      _ncmController.text = dados['ncm'] ?? '';
       _tituloAppBar = 'Editar Produto';
       _textoBotaoSalvar = 'Atualizar';
     }
@@ -107,26 +109,32 @@ class _TelaCadastroProdutoState extends State<TelaCadastroProduto> {
     _nomeController.dispose();
     _estoqueMinimoController.dispose();
     _estoqueMaximoController.dispose();
+    _ncmController.dispose();
     _valorController.dispose();
     super.dispose();
   }
 
   void _salvar() async {
+
+    final scaffoldMessenger = ScaffoldMessenger.of(context);
+    final navigator = Navigator.of(context);
+    // --- FIM DA CORREÇÃO ---
+
     // Verificação de segurança: impede o salvamento se o empresaId não foi carregado.
     if (_empresaId == null) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Erro: Não foi possível identificar a empresa. Tente novamente.'), backgroundColor: Colors.red));
+      // 2. Usamos a variável aqui.
+      scaffoldMessenger.showSnackBar(const SnackBar(content: Text('Erro: Não foi possível identificar a empresa. Tente novamente.'), backgroundColor: Colors.red)); // <-- CORREÇÃO 1
       return;
     }
 
     if (_formKey.currentState!.validate() && !_isLoading) {
       setState(() { _isLoading = true; });
+
       try {
         final codigo = _codigoController.text.trim();
         final modoEdicao = widget.produtoParaEditar != null;
         final db = FirebaseFirestore.instance;
 
-        // ---> MUDANÇA 5: A verificação de código duplicado agora é segura.
-        // Ela só busca por códigos dentro da MESMA empresa.
         final query = await db.collection('produtos')
             .where('empresaId', isEqualTo: _empresaId)
             .where('codigo', isEqualTo: codigo)
@@ -134,19 +142,18 @@ class _TelaCadastroProdutoState extends State<TelaCadastroProduto> {
 
         if (query.docs.isNotEmpty) {
           if (!modoEdicao || (modoEdicao && query.docs.first.id != widget.produtoParaEditar!.id)) {
-            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Erro: Este código de produto já existe na sua empresa.'), backgroundColor: Colors.red));
+            scaffoldMessenger.showSnackBar(const SnackBar(content: Text('Erro: Este código de produto já existe na sua empresa.'), backgroundColor: Colors.red)); // (Você já tinha acertado esta)
             setState(() => _isLoading = false);
             return;
           }
         }
-
         final Map<String, dynamic> dadosProduto = {
-          // ---> MUDANÇA 6: "Carimbamos" o produto com o empresaId.
           'empresaId': _empresaId,
           'codigo': codigo,
           'nome': _nomeController.text.trim(),
           'tipo': _tipoSelecionado,
           'grupo': _grupoSelecionado,
+          'ncm': _grupoSelecionado == 'REVENDA' ? _ncmController.text.trim() : null,
           'unidade': _unidadeSelecionada,
           'estoqueMinimo': double.tryParse(_estoqueMinimoController.text.replaceAll(',', '.')) ?? 0.0,
           'estoqueMaximo': double.tryParse(_estoqueMaximoController.text.replaceAll(',', '.')) ?? 0.0,
@@ -157,15 +164,16 @@ class _TelaCadastroProdutoState extends State<TelaCadastroProduto> {
 
         if (modoEdicao) {
           await db.collection('produtos').doc(widget.produtoParaEditar!.id).update(dadosProduto);
-          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Produto atualizado com sucesso!'), backgroundColor: Colors.blue));
+          scaffoldMessenger.showSnackBar(const SnackBar(content: Text('Produto atualizado com sucesso!'), backgroundColor: Colors.blue)); // (Você já tinha acertado esta)
         } else {
           dadosProduto['quantidadeAtual'] = 0.0;
           await db.collection('produtos').add(dadosProduto);
-          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Produto salvo com sucesso!'), backgroundColor: Colors.green));
+          scaffoldMessenger.showSnackBar(const SnackBar(content: Text('Produto salvo com sucesso!'), backgroundColor: Colors.green)); // (Você já tinha acertado esta)
         }
-        if (mounted) Navigator.of(context).pop();
+        if (mounted) navigator.pop(); // <-- CORREÇÃO 2
+
       } catch (e) {
-        if(mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Erro ao salvar no Firebase: $e'), backgroundColor: Colors.red));
+        if(mounted) scaffoldMessenger.showSnackBar(SnackBar(content: Text('Erro ao salvar no Firebase: $e'), backgroundColor: Colors.red)); // <-- CORREÇÃO 3
       } finally {
         if (mounted) {
           setState(() { _isLoading = false; });
@@ -203,7 +211,7 @@ class _TelaCadastroProdutoState extends State<TelaCadastroProduto> {
                 ),
                 const SizedBox(height: 16),
                 DropdownButtonFormField<String>(
-                  value: _tipoSelecionado,
+                  initialValue: _tipoSelecionado,
                   hint: const Text('Tipo'),
                   items: _tiposDeProduto.map((String tipo) => DropdownMenuItem<String>(value: tipo, child: Text(tipo))).toList(),
                   onChanged: (String? novoValor) => setState(() => _tipoSelecionado = novoValor),
@@ -211,15 +219,28 @@ class _TelaCadastroProdutoState extends State<TelaCadastroProduto> {
                 ),
                 const SizedBox(height: 16),
                 DropdownButtonFormField<String>(
-                  value: _grupoSelecionado,
+                  initialValue: _grupoSelecionado,
                   hint: const Text('Grupo'),
                   items: _gruposDeProduto.map((String grupo) => DropdownMenuItem<String>(value: grupo, child: Text(grupo))).toList(),
                   onChanged: (String? novoValor) => setState(() => _grupoSelecionado = novoValor),
                   validator: (value) => value == null ? 'Selecione um grupo' : null,
                 ),
                 const SizedBox(height: 16),
+                if (_grupoSelecionado == 'REVENDA') ...[
+                  TextFormField(
+                    controller: _ncmController,
+                    decoration: const InputDecoration(labelText: 'NCM'),
+                    keyboardType: TextInputType.number,
+                    inputFormatters: [
+                      FilteringTextInputFormatter.digitsOnly,
+                      LengthLimitingTextInputFormatter(8), // NCM tem 8 dígitos
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+                ],
+                const SizedBox(height: 16),
                 DropdownButtonFormField<String>(
-                  value: _unidadeSelecionada,
+                  initialValue: _unidadeSelecionada,
                   hint: const Text('Unidade'),
                   items: _unidadesDeMedida.map((String unidade) => DropdownMenuItem<String>(value: unidade, child: Text(unidade))).toList(),
                   onChanged: (String? novoValor) => setState(() => _unidadeSelecionada = novoValor),
@@ -263,11 +284,11 @@ class _TelaCadastroProdutoState extends State<TelaCadastroProduto> {
                 const SizedBox(height: 24),
                 ElevatedButton(
                   onPressed: _salvar,
-                  child: _isLoading ? const CircularProgressIndicator(color: Colors.white) : Text(_textoBotaoSalvar),
                   style: ElevatedButton.styleFrom(
                     padding: const EdgeInsets.symmetric(vertical: 20),
                     textStyle: const TextStyle(fontSize: 18),
                   ),
+                  child: _isLoading ? const CircularProgressIndicator(color: Colors.white) : Text(_textoBotaoSalvar),
                 ),
               ],
             ),
