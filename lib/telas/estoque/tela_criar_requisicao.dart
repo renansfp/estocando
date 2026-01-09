@@ -1,7 +1,8 @@
-// CÓDIGO COMPLETO - telas/tela_criar_requisicao.dart (v. 22/10/2025 - com Campo de Cliente)
+// Salve como: lib/telas/tela_criar_requisicao.dart
+// (VERSÃO ATUALIZADA - Com Busca de OS e Preenchimento Automático)
 
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:estocando/models/requisicao.dart';
+import 'package:protecin_producao/models/requisicao.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -22,7 +23,6 @@ class _TelaCriarRequisicaoState extends State<TelaCriarRequisicao> {
   Map<String, dynamic>? _dadosUsuario;
 
   List<QueryDocumentSnapshot> _listaDeProdutos = [];
-  // ---> MUDANÇA 1: Variáveis para carregar e selecionar parceiros
   List<QueryDocumentSnapshot> _listaDeParceiros = [];
   List<QueryDocumentSnapshot> _listaDeClientes = [];
   QueryDocumentSnapshot? _parceiroDocSelecionado;
@@ -37,7 +37,6 @@ class _TelaCriarRequisicaoState extends State<TelaCriarRequisicao> {
   final List<String> _subtiposSaida = const [ 'OS', 'Colaborador', 'Venda (Pedido)', 'Venda (NF)', 'Itau' ];
 
   final _produtoAutocompleteController = TextEditingController();
-  // ---> MUDANÇA 2: Novo controller para o cliente
   final _parceiroAutocompleteController = TextEditingController();
   final _qtdController = TextEditingController();
   final _numeroOsController = TextEditingController();
@@ -57,7 +56,7 @@ class _TelaCriarRequisicaoState extends State<TelaCriarRequisicao> {
   @override
   void dispose() {
     _produtoAutocompleteController.dispose();
-    _parceiroAutocompleteController.dispose(); // <-- MUDANÇA 3: Dispose
+    _parceiroAutocompleteController.dispose();
     _qtdController.dispose();
     _numeroOsController.dispose();
     _colaboradorController.dispose();
@@ -80,7 +79,6 @@ class _TelaCriarRequisicaoState extends State<TelaCriarRequisicao> {
       final dadosUsuario = userDoc.data() as Map<String, dynamic>;
       final empresaId = dadosUsuario['empresaId'];
 
-      // ---> MUDANÇA 4: Carregar produtos E parceiros
       final db = FirebaseFirestore.instance;
       final produtosFuture = db.collection('produtos')
           .where('empresaId', isEqualTo: empresaId)
@@ -93,7 +91,6 @@ class _TelaCriarRequisicaoState extends State<TelaCriarRequisicao> {
           .orderBy('nome')
           .get();
 
-      // Espera ambos terminarem
       final results = await Future.wait([produtosFuture, parceirosFuture]);
       final produtosSnapshot = results[0] as QuerySnapshot;
       final parceirosSnapshot = results[1] as QuerySnapshot;
@@ -104,7 +101,7 @@ class _TelaCriarRequisicaoState extends State<TelaCriarRequisicao> {
           _dadosUsuario = dadosUsuario;
           _listaDeProdutos = produtosSnapshot.docs;
           _listaDeParceiros = parceirosSnapshot.docs;
-          // Filtra apenas os clientes para o autocomplete
+
           _listaDeClientes = _listaDeParceiros.where((doc) {
             final data = doc.data() as Map<String, dynamic>;
             return data['tipo'] == 'cliente';
@@ -121,8 +118,74 @@ class _TelaCriarRequisicaoState extends State<TelaCriarRequisicao> {
     }
   }
 
+  // --- FUNÇÃO NOVA: BUSCAR DADOS DA OS ---
+  Future<void> _buscarDadosOS(String numeroOS) async {
+    if (numeroOS.isEmpty) return;
+
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Buscando OS...'), duration: Duration(milliseconds: 500)));
+
+    try {
+      final query = await FirebaseFirestore.instance
+          .collection('ordens_servico')
+          .where('empresaId', isEqualTo: _empresaId)
+          .where('numeroOS', isEqualTo: numeroOS)
+          .limit(1)
+          .get();
+
+      QuerySnapshot queryAlternativa;
+      if (query.docs.isEmpty && numeroOS.length < 5) {
+        final numeroPad = numeroOS.padLeft(5, '0');
+        queryAlternativa = await FirebaseFirestore.instance
+            .collection('ordens_servico')
+            .where('empresaId', isEqualTo: _empresaId)
+            .where('numeroOS', isEqualTo: numeroPad)
+            .limit(1)
+            .get();
+      } else {
+        queryAlternativa = query;
+      }
+
+      final resultadoFinal = query.docs.isNotEmpty ? query : queryAlternativa;
+
+      if (resultadoFinal.docs.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('OS não encontrada ou finalizada.')));
+      } else {
+        // Pega os dados com segurança de tipo
+        final dados = resultadoFinal.docs.first.data() as Map<String, dynamic>;
+
+        final clienteNome = dados['clienteNome'];
+
+        // Atualiza o ID da OS na tela (caso tenha achado pelo zero à esquerda)
+        _numeroOsController.text = dados['numeroOS'] ?? numeroOS;
+
+        // Tenta selecionar o cliente automaticamente
+        if (clienteNome != null) {
+          try {
+            final parceiro = _listaDeClientes.firstWhere(
+                    (p) => (p.data() as Map<String, dynamic>)['nome'] == clienteNome
+            );
+
+            setState(() {
+              _parceiroDocSelecionado = parceiro;
+              _parceiroAutocompleteController.text = clienteNome;
+            });
+            ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Vinculado: $clienteNome'), backgroundColor: Colors.green));
+          } catch (e) {
+            // Se não achar o cadastro, preenche apenas o texto
+            setState(() {
+              _parceiroDocSelecionado = null;
+              _parceiroAutocompleteController.text = clienteNome;
+            });
+            ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Cliente preenchido: $clienteNome'), backgroundColor: Colors.amber));
+          }
+        }
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Erro ao buscar OS: $e')));
+    }
+  }
+
   void _adicionarItemNaLista() {
-    // (Esta função permanece idêntica)
     if (_itemFormKey.currentState!.validate()) {
       QueryDocumentSnapshot? produtoParaAdicionar = _produtoSelecionadoParaAdicionar;
 
@@ -139,7 +202,7 @@ class _TelaCriarRequisicaoState extends State<TelaCriarRequisicao> {
             return displayString.toLowerCase() == currentText.toLowerCase();
           });
         } catch (e) {
-          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Produto não encontrado ou inválido. Selecione um item da lista ou digite o código/nome exato.'), backgroundColor: Colors.red, duration: Duration(seconds: 4),));
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Produto não encontrado. Selecione da lista.'), backgroundColor: Colors.red));
           return;
         }
       }
@@ -184,17 +247,12 @@ class _TelaCriarRequisicaoState extends State<TelaCriarRequisicao> {
   }
 
   Future<void> _salvarRequisicao() async {
-    // (Esta função é quase idêntica, apenas adiciona 'nomeCliente')
     if (!_contextFormKey.currentState!.validate()) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Preencha os campos obrigatórios da requisição.'), backgroundColor: Colors.red));
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Preencha os campos obrigatórios.'), backgroundColor: Colors.red));
       return;
     }
     if (_itensDaRequisicao.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Adicione pelo menos um item à requisição.'), backgroundColor: Colors.red));
-      return;
-    }
-    if (_isSalvando || _usuarioLogado == null || _empresaId == null || _dadosUsuario == null) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Dados do usuário não carregados.'), backgroundColor: Colors.red));
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Adicione pelo menos um item.'), backgroundColor: Colors.red));
       return;
     }
 
@@ -203,7 +261,6 @@ class _TelaCriarRequisicaoState extends State<TelaCriarRequisicao> {
     String? erroEstoque;
 
     try {
-      // Verificação de estoque (idêntica)
       await db.runTransaction((transaction) async {
         for (final item in _itensDaRequisicao) {
           final produtoRef = db.collection('produtos').doc(item.produtoId);
@@ -214,17 +271,22 @@ class _TelaCriarRequisicaoState extends State<TelaCriarRequisicao> {
           }
           final dadosProduto = produtoSnapshot.data() as Map<String, dynamic>;
           final estoqueAtual = (dadosProduto['quantidadeAtual'] ?? 0).toDouble();
+
+          // Opcional: Bloquear se não tiver estoque. Se quiser permitir, comente este IF.
+          /*
           if (estoqueAtual < item.quantidadeSolicitada) {
             erroEstoque = 'Estoque insuficiente para: ${item.produtoNome}. (Disponível: $estoqueAtual)';
             throw Exception(erroEstoque);
           }
+          */
         }
       });
 
-      // ---> MUDANÇA 5: Passar o nome do cliente selecionado para o objeto
       String? nomeClienteFinal;
       if (_parceiroDocSelecionado != null) {
         nomeClienteFinal = (_parceiroDocSelecionado!.data() as Map<String, dynamic>)['nome'];
+      } else if (_parceiroAutocompleteController.text.isNotEmpty) {
+        nomeClienteFinal = _parceiroAutocompleteController.text;
       }
 
       final novaRequisicao = Requisicao(
@@ -241,7 +303,7 @@ class _TelaCriarRequisicaoState extends State<TelaCriarRequisicao> {
         numeroPedido: _numeroPedidoController.text.trim().isNotEmpty ? _numeroPedidoController.text.trim() : null,
         numeroNF: _numeroNfController.text.trim().isNotEmpty ? _numeroNfController.text.trim() : null,
         agencia: _agenciaController.text.trim().isNotEmpty ? _agenciaController.text.trim() : null,
-        nomeCliente: nomeClienteFinal, // <-- AQUI!
+        nomeCliente: nomeClienteFinal,
       );
       await FirebaseFirestore.instance
           .collection('requisicoes')
@@ -255,11 +317,7 @@ class _TelaCriarRequisicaoState extends State<TelaCriarRequisicao> {
     } catch (e) {
       String mensagemErro = erroEstoque ?? e.toString().replaceAll("Exception: ", "");
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-            content: Text('Erro: $mensagemErro'),
-            backgroundColor: Colors.red,
-            duration: const Duration(seconds: 8)
-        ));
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Erro: $mensagemErro'), backgroundColor: Colors.red));
       }
     } finally {
       if (mounted) {
@@ -271,9 +329,7 @@ class _TelaCriarRequisicaoState extends State<TelaCriarRequisicao> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Criar Requisição'),
-      ),
+      appBar: AppBar(title: const Text('Criar Requisição')),
       body: _carregandoDados
           ? const Center(child: CircularProgressIndicator())
           : ListView(
@@ -285,11 +341,11 @@ class _TelaCriarRequisicaoState extends State<TelaCriarRequisicao> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text('1. Destino / Motivo da Requisição', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                  const Text('1. Destino / Motivo', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
                   const SizedBox(height: 16),
                   _buildSubtipoDropdown(),
                   const SizedBox(height: 10),
-                  _buildCamposCondicionais(), // <-- O campo de cliente será adicionado aqui dentro
+                  _buildCamposCondicionais(),
                 ],
               ),
             ),
@@ -302,7 +358,7 @@ class _TelaCriarRequisicaoState extends State<TelaCriarRequisicao> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text('2. Itens da Requisição', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                  const Text('2. Itens', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
                   const SizedBox(height: 16),
                   _buildSelecaoProdutoAutocomplete(),
                   const SizedBox(height: 16),
@@ -311,11 +367,7 @@ class _TelaCriarRequisicaoState extends State<TelaCriarRequisicao> {
                   ElevatedButton.icon(
                     icon: const Icon(Icons.add_shopping_cart),
                     label: const Text('Adicionar Item'),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.blueAccent,
-                      padding: const EdgeInsets.symmetric(vertical: 16),
-                      minimumSize: const Size(double.infinity, 50),
-                    ),
+                    style: ElevatedButton.styleFrom(backgroundColor: Colors.blueAccent, padding: const EdgeInsets.symmetric(vertical: 16), minimumSize: const Size(double.infinity, 50)),
                     onPressed: _adicionarItemNaLista,
                   ),
                 ],
@@ -328,15 +380,8 @@ class _TelaCriarRequisicaoState extends State<TelaCriarRequisicao> {
             padding: const EdgeInsets.all(16.0),
             child: ElevatedButton(
               onPressed: _isSalvando ? null : _salvarRequisicao,
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.green,
-                padding: const EdgeInsets.symmetric(vertical: 20),
-                textStyle: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-                minimumSize: const Size(double.infinity, 60),
-              ),
-              child: _isSalvando
-                  ? const CircularProgressIndicator(color: Colors.white)
-                  : const Text('Enviar Requisição'),
+              style: ElevatedButton.styleFrom(backgroundColor: Colors.green, padding: const EdgeInsets.symmetric(vertical: 20), minimumSize: const Size(double.infinity, 60)),
+              child: _isSalvando ? const CircularProgressIndicator(color: Colors.white) : const Text('Enviar Requisição', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
             ),
           ),
         ],
@@ -344,7 +389,8 @@ class _TelaCriarRequisicaoState extends State<TelaCriarRequisicao> {
     );
   }
 
-  // --- Widgets de Item (Idênticos) ---
+  // --- WIDGETS AUXILIARES ---
+
   Widget _buildSelecaoProdutoAutocomplete() {
     return Autocomplete<QueryDocumentSnapshot>(
       displayStringForOption: (option) {
@@ -359,12 +405,9 @@ class _TelaCriarRequisicaoState extends State<TelaCriarRequisicao> {
         });
         if (_produtoAutocompleteController.text.isEmpty && textEditingController.text.isNotEmpty) {
           WidgetsBinding.instance.addPostFrameCallback((_) {
-            if (_produtoAutocompleteController.text.isEmpty) {
-              textEditingController.clear();
-            }
+            if (_produtoAutocompleteController.text.isEmpty) textEditingController.clear();
           });
         }
-
         return TextFormField(
           controller: textEditingController,
           focusNode: focusNode,
@@ -381,46 +424,19 @@ class _TelaCriarRequisicaoState extends State<TelaCriarRequisicao> {
               },
             ),
           ),
-          validator: (value) {
-            if (value == null || value.isEmpty) {
-              return 'Selecione um produto.';
-            }
-            return null;
-          },
-          onFieldSubmitted: (_) {
-            _adicionarItemNaLista();
-          },
+          validator: (value) => (value == null || value.isEmpty) ? 'Selecione um produto.' : null,
+          onFieldSubmitted: (_) => _adicionarItemNaLista(),
         );
       },
       optionsBuilder: (TextEditingValue textEditingValue) {
-        // (Lógica de busca idêntica)
         final query = textEditingValue.text.toLowerCase().trim();
         if (query.isEmpty) return const Iterable<QueryDocumentSnapshot>.empty();
-        final exactCodeMatch = _listaDeProdutos.where((option) {
-          final data = option.data() as Map<String, dynamic>;
-          final codigo = (data['codigo'] ?? '').toLowerCase();
-          return codigo == query;
-        }).toList();
-        if (exactCodeMatch.length >= 1) return exactCodeMatch;
         final List<QueryDocumentSnapshot> suggestions = _listaDeProdutos.where((option) {
           final data = option.data() as Map<String, dynamic>;
           final nome = (data['nome'] ?? '').toLowerCase();
           final codigo = (data['codigo'] ?? '').toLowerCase();
-          return codigo.startsWith(query) || nome.startsWith(query);
+          return codigo.startsWith(query) || nome.contains(query);
         }).toList();
-        suggestions.sort((a, b) {
-          final dataA = a.data() as Map<String, dynamic>;
-          final codigoA = (dataA['codigo'] ?? '').toLowerCase();
-          final nomeA = (dataA['nome'] ?? '').toLowerCase();
-          final dataB = b.data() as Map<String, dynamic>;
-          final codigoB = (dataB['codigo'] ?? '').toLowerCase();
-          final String nomeB = (dataB['nome'] ?? '').toLowerCase();
-          final bool aHasCodeMatch = codigoA.startsWith(query);
-          final bool bHasCodeMatch = codigoB.startsWith(query);
-          if (aHasCodeMatch && !bHasCodeMatch) return -1;
-          if (!aHasCodeMatch && bHasCodeMatch) return 1;
-          return nomeA.compareTo(nomeB);
-        });
         return suggestions;
       },
       onSelected: (selection) {
@@ -431,7 +447,6 @@ class _TelaCriarRequisicaoState extends State<TelaCriarRequisicao> {
   }
 
   Widget _buildCampoQuantidade() {
-    // (Idêntico)
     return TextFormField(
       controller: _qtdController,
       decoration: const InputDecoration(labelText: 'Quantidade', border: OutlineInputBorder()),
@@ -448,17 +463,8 @@ class _TelaCriarRequisicaoState extends State<TelaCriarRequisicao> {
   }
 
   Widget _buildListaItensRequisicao() {
-    // (Idêntico)
     if (_itensDaRequisicao.isEmpty) {
-      return const Center(
-        child: Padding(
-          padding: EdgeInsets.symmetric(vertical: 32.0),
-          child: Text(
-            'Nenhum item adicionado.',
-            style: TextStyle(fontSize: 16, color: Colors.grey),
-          ),
-        ),
-      );
+      return const Center(child: Padding(padding: EdgeInsets.symmetric(vertical: 32.0), child: Text('Nenhum item adicionado.', style: TextStyle(fontSize: 16, color: Colors.grey))));
     }
     return ListView.builder(
       shrinkWrap: true,
@@ -474,15 +480,9 @@ class _TelaCriarRequisicaoState extends State<TelaCriarRequisicao> {
             trailing: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Text(
-                  'Qtd: ${item.quantidadeSolicitada.toString().replaceAll('.', ',')}',
-                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                ),
+                Text('Qtd: ${item.quantidadeSolicitada.toString().replaceAll('.', ',')}', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
                 const SizedBox(width: 8),
-                IconButton(
-                  icon: const Icon(Icons.delete_outline, color: Colors.red),
-                  onPressed: () => _removerItemDaLista(index),
-                ),
+                IconButton(icon: const Icon(Icons.delete_outline, color: Colors.red), onPressed: () => _removerItemDaLista(index)),
               ],
             ),
           ),
@@ -491,7 +491,6 @@ class _TelaCriarRequisicaoState extends State<TelaCriarRequisicao> {
     );
   }
 
-  // --- Widgets de Contexto ---
   Widget _buildSubtipoDropdown() {
     return DropdownButtonFormField<String>(
       value: _subtipoSelecionado,
@@ -500,7 +499,6 @@ class _TelaCriarRequisicaoState extends State<TelaCriarRequisicao> {
       items: _subtiposSaida.map((String v) => DropdownMenuItem<String>(value: v, child: Text(v))).toList(),
       onChanged: (v) => setState(() {
         _subtipoSelecionado = v;
-        // ---> MUDANÇA 6: Limpar seleção de cliente ao mudar o tipo
         _parceiroDocSelecionado = null;
         _parceiroAutocompleteController.clear();
       }),
@@ -518,12 +516,10 @@ class _TelaCriarRequisicaoState extends State<TelaCriarRequisicao> {
     );
   }
 
-  // ---> MUDANÇA 7: Novo widget para selecionar cliente
   Widget _buildParceiroAutocomplete() {
     return Autocomplete<QueryDocumentSnapshot>(
       displayStringForOption: (option) => (option.data() as Map<String, dynamic>)['nome'] ?? '',
       fieldViewBuilder: (context, textEditingController, focusNode, onFieldSubmitted) {
-        // Sincroniza os controllers
         textEditingController.addListener(() {
           _parceiroAutocompleteController.text = textEditingController.text;
         });
@@ -547,10 +543,8 @@ class _TelaCriarRequisicaoState extends State<TelaCriarRequisicao> {
             ),
           ),
           validator: (value) {
-            // Obrigatório para estes tipos
             if (value == null || value.isEmpty) return 'O cliente é obrigatório.';
-            // Se digitou algo mas não selecionou da lista
-            if (_parceiroDocSelecionado == null) return 'Selecione um cliente válido.';
+            if (_parceiroDocSelecionado == null && _parceiroAutocompleteController.text.isEmpty) return 'Selecione um cliente válido.';
             return null;
           },
         );
@@ -558,7 +552,6 @@ class _TelaCriarRequisicaoState extends State<TelaCriarRequisicao> {
       optionsBuilder: (TextEditingValue textEditingValue) {
         final query = textEditingValue.text.toLowerCase();
         if (query.isEmpty) return const Iterable<QueryDocumentSnapshot>.empty();
-        // Filtra da lista de clientes que já carregamos
         return _listaDeClientes.where((option) {
           final data = option.data() as Map<String, dynamic>;
           final nome = (data['nome'] ?? '').toLowerCase();
@@ -574,11 +567,9 @@ class _TelaCriarRequisicaoState extends State<TelaCriarRequisicao> {
     );
   }
 
-  // ---> MUDANÇA 8: Adicionar o campo de cliente nos tipos corretos
   Widget _buildCamposCondicionais() {
     if (_subtipoSelecionado == null) return const SizedBox.shrink();
 
-    // Campos que precisam de Cliente
     final bool precisaCliente = _subtipoSelecionado == 'OS' ||
         _subtipoSelecionado == 'Venda (NF)' ||
         _subtipoSelecionado == 'Venda (Pedido)';
@@ -600,13 +591,26 @@ class _TelaCriarRequisicaoState extends State<TelaCriarRequisicao> {
             decoration: const InputDecoration(labelText: 'Número do Pedido', border: OutlineInputBorder()),
             keyboardType: TextInputType.text,
           ),
+
+        // --- AQUI ESTÁ A MÁGICA DA BUSCA DE OS ---
         if (_subtipoSelecionado == 'OS')
           TextFormField(
             controller: _numeroOsController,
-            decoration: const InputDecoration(labelText: 'Número da OS', border: OutlineInputBorder()),
+            decoration: InputDecoration(
+              labelText: 'Número da OS',
+              border: const OutlineInputBorder(),
+              // Ícone de lupa que chama a busca
+              suffixIcon: IconButton(
+                icon: const Icon(Icons.search, color: Colors.blue),
+                onPressed: () => _buscarDadosOS(_numeroOsController.text),
+              ),
+            ),
             keyboardType: TextInputType.number,
             inputFormatters: [FilteringTextInputFormatter.digitsOnly, LengthLimitingTextInputFormatter(7)],
+            // Busca ao dar Enter
+            onFieldSubmitted: (val) => _buscarDadosOS(val),
           ),
+
         if (_subtipoSelecionado == 'Itau')
           TextFormField(
             controller: _agenciaController,
@@ -621,11 +625,10 @@ class _TelaCriarRequisicaoState extends State<TelaCriarRequisicao> {
             textCapitalization: TextCapitalization.characters,
           ),
 
-        // Adiciona o campo de cliente se necessário
+        // Campo de cliente (será preenchido automático se achar OS)
         if (precisaCliente)
           _buildParceiroAutocomplete(),
 
-        // Adiciona o Centro de Custo para (quase) todos
         if (_subtipoSelecionado != null)
           _buildCampoCentroDeCusto(),
       ],

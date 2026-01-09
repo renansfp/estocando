@@ -1,11 +1,11 @@
 // CÓDIGO COMPLETO E FINAL - telas/tela_requisicoes_pendentes.dart (v. 22/10/2025 - Passando nomeCliente)
 
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:estocando/models/requisicao.dart';
+import 'package:protecin_producao/models/requisicao.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
-import '../models/movimentacao.dart';
+import '../../models/movimentacao.dart';
 
 class TelaRequisicoesPendentes extends StatefulWidget {
   const TelaRequisicoesPendentes({super.key});

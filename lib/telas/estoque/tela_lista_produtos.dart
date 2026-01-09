@@ -2,8 +2,8 @@
 // (Este é o seu código da tela_home.dart, mas modificado com a BUSCA CORRIGIDA)
 
 import 'dart:async';
-import 'package:estocando/models/movimentacao.dart';
-import 'package:estocando/telas/tela_movimentacao.dart';
+import 'package:protecin_producao/models/movimentacao.dart';
+import 'package:protecin_producao/telas/estoque/tela_movimentacao.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';

@@ -1,13 +1,13 @@
 {
   "project_info": {
-    "project_number": "395433578397",
-    "project_id": "estocando-6d08f",
-    "storage_bucket": "estocando-6d08f.firebasestorage.app"
+    "project_number": "1084844005739",
+    "project_id": "protecin-producao",
+    "storage_bucket": "protecin-producao.firebasestorage.app"
   },
   "client": [
     {
       "client_info": {
-        "mobilesdk_app_id": "1:395433578397:android:7b4b9c00a4f918da8ce974",
+        "mobilesdk_app_id": "1:1084844005739:android:375a46dde142e42f72142e",
         "android_client_info": {
           "package_name": "com.example.estocando"
         }
@@ -15,7 +15,7 @@
       "oauth_client": [],
       "api_key": [
         {
-          "current_key": "AIzaSyBaL6WzHlYulOEDwmH1VRKmM2HUnCPT0wo"
+          "current_key": "AIzaSyA6hVXpzsOvOcVJ8cNia2rZLnkju1YoSFk"
         }
       ],
       "services": {

@@ -1,4 +1,5 @@
-// Arquivo: lib/models/parceiro.dart (VERSÃO ATUALIZADA)
+// Arquivo: lib/models/parceiro.dart
+// (VERSÃO COM ENDEREÇO COMPLETO)
 
 enum TipoParceiro {
   cliente,
@@ -6,26 +7,32 @@ enum TipoParceiro {
 }
 
 class Parceiro {
+  final String id;
   final String codigo;
   final TipoParceiro tipo;
   final String nome;
   final String cnpj;
+
+  // Novos campos adicionados:
   final String telefone;
   final String endereco;
+  final String cidade;
+  final String estado;
+  final String cep;
 
-  // ---> MUDANÇA 1: Adicionamos o campo para o ID da empresa. <---
   final String empresaId;
 
-  // O "PORQUÊ": Removemos o campo 'id' daqui, pois o Firestore já nos
-  // fornece um ID único para cada documento (o ID do documento).
   Parceiro({
+    required this.id,
     required this.codigo,
     required this.tipo,
     required this.nome,
     this.cnpj = '',
     this.telefone = '',
     this.endereco = '',
-    // ---> MUDANÇA 2: Tornamos o campo obrigatório ao criar um novo parceiro. <---
+    this.cidade = '',
+    this.estado = '',
+    this.cep = '',
     required this.empresaId,
   });
 
@@ -36,19 +43,24 @@ class Parceiro {
     'cnpj': cnpj,
     'telefone': telefone,
     'endereco': endereco,
-    // ---> MUDANÇA 3: Adicionamos ao "tradutor" para JSON, para salvar no Firebase. <---
+    'cidade': cidade,
+    'estado': estado,
+    'cep': cep,
     'empresaId': empresaId,
   };
 
-  factory Parceiro.fromJson(Map<String, dynamic> json) {
+  factory Parceiro.fromJson(Map<String, dynamic> json, String documentId) {
     return Parceiro(
+      id: documentId,
       codigo: json['codigo'] ?? '',
       tipo: TipoParceiro.values.byName(json['tipo'] ?? 'cliente'),
       nome: json['nome'] ?? '',
       cnpj: json['cnpj'] ?? '',
       telefone: json['telefone'] ?? '',
       endereco: json['endereco'] ?? '',
-      // ---> MUDANÇA 4: Adicionamos ao "tradutor" que lê do Firebase. <---
+      cidade: json['cidade'] ?? '',   // Evita erro se for null
+      estado: json['estado'] ?? '',   // Evita erro se for null
+      cep: json['cep'] ?? '',         // Evita erro se for null
       empresaId: json['empresaId'] ?? '',
     );
   }

@@ -1,6 +1,6 @@
 {
-    "name": "estocando",
-    "short_name": "estocando",
+    "name": "protecin_producao",
+    "short_name": "protecin_producao",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#0175C2",

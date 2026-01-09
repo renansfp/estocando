@@ -107,6 +107,3 @@ export const rejectUser = functions
 
 Depois de atualizar o arquivo, não se esqueça de fazer o deploy:
 
-```bash
-firebase deploy --only functions
-

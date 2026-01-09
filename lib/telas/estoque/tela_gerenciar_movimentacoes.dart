@@ -5,9 +5,9 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
-import '../services/movimentacao_service.dart';
+import '../../services/movimentacao_service.dart';
 // ---> MUDANÇA (EDIÇÃO): Importamos a tela de movimentação para poder abri-la.
-import 'package:estocando/telas/tela_movimentacao.dart';
+import 'package:protecin_producao/telas/estoque/tela_movimentacao.dart';
 
 
 class TelaGerenciarMovimentacoes extends StatefulWidget {

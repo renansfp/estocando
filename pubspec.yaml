@@ -1,5 +1,6 @@
-name: estocando
-description: "A new Flutter project."
+name: protecin_producao
+description: "Sistema de Gestão de Produção da Protecin."
+
 # The following line prevents the package from being accidentally published to
 # pub.dev using `flutter pub publish`. This is preferred for private packages.
 publish_to: 'none' # Remove this line if you wish to publish to pub.dev
@@ -51,6 +52,10 @@ dependencies:
   path_provider: ^2.1.3
   share_plus: ^9.0.0
   universal_html: ^2.2.4
+  provider: ^6.1.2
+  pdf: ^3.10.0
+  printing: ^5.11.0
+  mobile_scanner: ^7.1.4
 
 dev_dependencies:
   flutter_test:
@@ -103,4 +108,4 @@ flutter:
   #         weight: 700
   #
   # For details regarding fonts from package dependencies,
-  # see https://flutter.dev/to/font-from-package
+  # see https://flutt
