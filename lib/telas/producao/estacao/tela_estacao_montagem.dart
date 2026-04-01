@@ -1,14 +1,14 @@
-// Salve como: lib/telas/producao/estacao/tela_estacao_montagem.dart
-// (VERSÃO v2.1 - Sem Lacre + Com Leitor de QR Code)
-
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:mobile_scanner/mobile_scanner.dart'; // <--- NÃO ESQUEÇA DE ADICIONAR ESSE PACOTE
-import 'package:protecin_producao/provider/usuario_provider.dart';
-import 'package:provider/provider.dart';
+import 'package:protecin_producao/widgets/campo_com_scanner.dart';
+import 'package:protecin_producao/widgets/botao_condenar.dart';
+import 'package:protecin_producao/telas/producao/estacao/tela_execucao_montagem.dart';
+import 'package:protecin_producao/telas/estoque/tela_criar_requisicao.dart';
+import 'package:protecin_producao/utils/mapeador_custos.dart';
 
 class TelaEstacaoMontagem extends StatefulWidget {
   final String osId;
+
   const TelaEstacaoMontagem({super.key, required this.osId});
 
   @override
@@ -16,306 +16,150 @@ class TelaEstacaoMontagem extends StatefulWidget {
 }
 
 class _TelaEstacaoMontagemState extends State<TelaEstacaoMontagem> {
-  // Controladores
-  final _seloController = TextEditingController();
-  final _formKey = GlobalKey<FormState>();
+  final TextEditingController _scannerController = TextEditingController();
+  final Color corSetor = Colors.deepPurple.shade700;
 
-  // Controle de Cor do Anel (Padrão Verde 2026)
-  String _corAnel = 'VERDE';
-  final List<String> _coresAnel = ['VERDE', 'AMARELO', 'BRANCO', 'AZUL', 'PRETO', 'ALARANJADO', 'ROXO'];
-
-  @override
-  void dispose() {
-    _seloController.dispose();
-    super.dispose();
+  String _limparCodigo(String valor) {
+    String limpo = valor.trim().toUpperCase();
+    if (limpo.contains('HTTP')) limpo = limpo.split('/').last;
+    return limpo.replaceAll('R-', '');
   }
 
-  // --- LÓGICA DO SCANNER ---
-  void _abrirScanner() {
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      builder: (context) {
-        return Scaffold(
-          appBar: AppBar(title: const Text("Ler Selo Inmetro"), backgroundColor: Colors.black, foregroundColor: Colors.white),
-          body: MobileScanner(
-            onDetect: (capture) {
-              final List<Barcode> barcodes = capture.barcodes;
-              for (final barcode in barcodes) {
-                if (barcode.rawValue != null) {
-                  _processarCodigoLido(barcode.rawValue!);
-                  break;
-                }
-              }
-            },
-          ),
-        );
-      },
-    );
+  void _irParaExecucao(DocumentSnapshot doc) {
+    Navigator.push(context, MaterialPageRoute(builder: (context) => TelaExecucaoMontagem(
+      itemDoc: doc,
+      osId: widget.osId,
+    )));
   }
 
-  void _processarCodigoLido(String rawCode) {
-    // Lógica para limpar o link e pegar só o código
-    String codigoLimpo = rawCode;
-    if (rawCode.contains('http') || rawCode.contains('www')) {
-      if (rawCode.contains('=')) {
-        codigoLimpo = rawCode.split('=').last;
-      } else {
-        codigoLimpo = rawCode.split('/').last;
-      }
+  Future<void> _processarBipe(String codigo) async {
+    if (codigo.isEmpty) return;
+    String idCracha = _limparCodigo(codigo);
+
+    final query = await FirebaseFirestore.instance
+        .collection('itens_os')
+        .where('osId', isEqualTo: widget.osId)
+        .where('idCrachaTemporario', isEqualTo: idCracha)
+        .where('status', isEqualTo: 'aguardando_montagem')
+        .limit(1).get();
+
+    if (query.docs.isNotEmpty) {
+      _irParaExecucao(query.docs.first);
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Crachá não encontrado nesta OS ou já finalizado.'))
+      );
     }
-
-    setState(() {
-      _seloController.text = codigoLimpo.trim().toUpperCase();
-    });
-
-    Navigator.pop(context); // Fecha o scanner
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Selo lido com sucesso!'), backgroundColor: Colors.green, duration: Duration(seconds: 1)),
-    );
-  }
-  // -------------------------
-
-  // Abre a janelinha pedindo os dados finais
-  void _abrirDialogFinalizacao(DocumentSnapshot itemDoc) {
-    final data = itemDoc.data() as Map<String, dynamic>;
-    final codigoItem = data['idCrachaTemporario'] ?? '???';
-    final tipoAgente = data['tipoAgente'] ?? '???';
-
-    // Limpa os campos para o próximo item
-    _seloController.clear();
-    _corAnel = 'VERDE'; // Reseta para o padrão
-
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (ctx) {
-        return AlertDialog(
-          title: Text('Montagem Final: $codigoItem'),
-          content: Form(
-            key: _formKey,
-            child: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                      'Tipo: $tipoAgente',
-                      style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.grey)
-                  ),
-                  const SizedBox(height: 20),
-
-                  // CAMPO SELO INMETRO COM BOTÃO DE CÂMERA
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Expanded(
-                        child: TextFormField(
-                          controller: _seloController,
-                          decoration: const InputDecoration(
-                            labelText: 'Nº Selo Inmetro *',
-                            hintText: 'Bipe ou Digite',
-                            border: OutlineInputBorder(),
-                            prefixIcon: Icon(Icons.verified_user, color: Colors.brown),
-                            filled: true,
-                            fillColor: Colors.white,
-                          ),
-                          validator: (v) => (v == null || v.isEmpty) ? 'Obrigatório' : null,
-                        ),
-                      ),
-                      const SizedBox(width: 10),
-                      IconButton.filled(
-                        icon: const Icon(Icons.qr_code_scanner, size: 28),
-                        style: IconButton.styleFrom(
-                            backgroundColor: Colors.deepPurple,
-                            foregroundColor: Colors.white,
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                            minimumSize: const Size(55, 55)
-                        ),
-                        onPressed: _abrirScanner,
-                      )
-                    ],
-                  ),
-                  const SizedBox(height: 15),
-
-                  // CAMPO ANEL (Colorido e Visual)
-                  DropdownButtonFormField<String>(
-                    value: _corAnel,
-                    decoration: const InputDecoration(
-                      labelText: 'Cor do Anel',
-                      border: OutlineInputBorder(),
-                      prefixIcon: Icon(Icons.circle_outlined),
-                      filled: true,
-                      fillColor: Colors.white,
-                    ),
-                    items: _coresAnel.map((cor) {
-                      return DropdownMenuItem(
-                        value: cor,
-                        child: Row(
-                          children: [
-                            Container(width: 15, height: 15, color: _getCorReal(cor), margin: const EdgeInsets.only(right: 10)),
-                            Text(cor),
-                          ],
-                        ),
-                      );
-                    }).toList(),
-                    onChanged: (v) => _corAnel = v!,
-                  ),
-                ],
-              ),
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: const Text('Cancelar'),
-            ),
-            ElevatedButton(
-              style: ElevatedButton.styleFrom(backgroundColor: Colors.deepPurple, foregroundColor: Colors.white),
-              onPressed: () {
-                if (_formKey.currentState!.validate()) {
-                  Navigator.pop(ctx); // Fecha o dialog
-                  _finalizarMontagem(itemDoc); // Salva no banco
-                }
-              },
-              child: const Text('FINALIZAR'),
-            ),
-          ],
-        );
-      },
-    );
-  }
-
-  Future<void> _finalizarMontagem(DocumentSnapshot itemDoc) async {
-    final usuario = Provider.of<UsuarioProvider>(context, listen: false).usuario;
-    final dados = itemDoc.data() as Map<String, dynamic>;
-    final equipId = dados['equipamentoId'];
-    final codigo = dados['idCrachaTemporario'];
-
-    try {
-      await FirebaseFirestore.instance.runTransaction((transaction) async {
-        final itemRef = FirebaseFirestore.instance.collection('itens_os').doc(itemDoc.id);
-
-        // 1. Atualiza Item da OS
-        transaction.update(itemRef, {
-          'status': 'aguardando_expedicao', // Pronto
-          'montagem': {
-            'data': FieldValue.serverTimestamp(),
-            'operador': usuario?.nome ?? 'Desconhecido',
-            'selo_inmetro': _seloController.text.trim(),
-            'cor_anel': _corAnel,
-            // 'lacre': REMOVIDO CONFORME SOLICITADO
-          }
-        });
-
-        // 2. Atualiza o Cadastro do Extintor (Para histórico)
-        if (equipId != null && equipId.isNotEmpty) {
-          final equipRef = FirebaseFirestore.instance.collection('equipamentos').doc(equipId);
-          transaction.update(equipRef, {
-            'seloInmetroAtual': _seloController.text.trim(),
-            'dataUltimaMontagem': FieldValue.serverTimestamp(),
-          });
-        }
-      });
-
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Item $codigo montado com sucesso!'), backgroundColor: Colors.green)
-        );
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Erro ao salvar: $e'), backgroundColor: Colors.red)
-        );
-      }
-    }
-  }
-
-  Color _getCorReal(String nomeCor) {
-    switch (nomeCor) {
-      case 'VERDE': return Colors.green;
-      case 'AMARELO': return Colors.yellow;
-      case 'BRANCO': return Colors.grey;
-      case 'AZUL': return Colors.blue;
-      case 'ALARANJADO': return Colors.orange;
-      case 'ROXO': return Colors.purple;
-      case 'PRETO': return Colors.black;
-      default: return Colors.grey;
-    }
+    _scannerController.clear();
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Execução: Montagem'),
-        backgroundColor: Colors.deepPurple[700],
+        title: Text('Montagem Final: OS ${widget.osId}'),
+        backgroundColor: corSetor,
         foregroundColor: Colors.white,
+        actions: [
+          // Requisição para o SETOR (CC 4224)
+          IconButton(
+            icon: const Icon(Icons.inventory_2),
+            tooltip: 'Requisição para o Setor',
+            onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (ctx) => TelaCriarRequisicao(
+              ccPrePreenchido: MapeadorCustos.obterCC('MONTAGEM'),
+              subTipoPrePreenchido: 'Colaborador',
+            ))),
+          ),
+          // Requisição para a OS
+          IconButton(
+            icon: const Icon(Icons.shopping_cart_checkout),
+            tooltip: 'Material para esta OS',
+            onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (ctx) => TelaCriarRequisicao(
+              osPrePreenchida: widget.osId,
+              ccPrePreenchido: MapeadorCustos.obterCC('MONTAGEM'),
+              subTipoPrePreenchido: 'OS',
+            ))),
+          ),
+        ],
       ),
-      body: StreamBuilder<QuerySnapshot>(
-        stream: FirebaseFirestore.instance
-            .collection('itens_os')
-            .where('osId', isEqualTo: widget.osId)
-        // IMPORTANTE: O status deve bater com o que sai da Recarga/Estanqueidade
-            .where('status', isEqualTo: 'aguardando_montagem')
-            .snapshots(),
-        builder: (context, snapshot) {
-          if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
+      body: Column(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(16.0),
+            color: Colors.deepPurple.shade50,
+            child: CampoComScanner(
+              controller: _scannerController,
+              label: 'Bipar Crachá para Selagem',
+              onSubmitted: _processarBipe,
+            ),
+          ),
+          Expanded(
+            child: StreamBuilder<QuerySnapshot>(
+              stream: FirebaseFirestore.instance
+                  .collection('itens_os')
+                  .where('osId', isEqualTo: widget.osId)
+                  .where('status', isEqualTo: 'aguardando_montagem')
+                  .snapshots(),
+              builder: (context, snapshot) {
+                if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
+                final itens = snapshot.data!.docs;
+                if (itens.isEmpty) return _buildConcluido();
 
-          final itens = snapshot.data!.docs;
+                return ListView.builder(
+                  padding: const EdgeInsets.symmetric(vertical: 8),
+                  itemCount: itens.length,
+                  itemBuilder: (context, index) {
+                    final d = itens[index].data() as Map<String, dynamic>;
+                    return Card(
+                      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                      child: ListTile(
+                        leading: CircleAvatar(
+                          backgroundColor: corSetor.withOpacity(0.1),
+                          child: Icon(Icons.verified, color: corSetor),
+                        ),
+                        title: Text('Crachá: ${d['idCrachaTemporario']}', style: const TextStyle(fontWeight: FontWeight.bold)),
+                        subtitle: Text('${d['tipoAgente']} ${d['capacidade']} - Aguardando Lacração'),
+                        trailing: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            BotaoCondenar(itemDoc: itens[index], etapa: 'montagem'),
+                            const Icon(Icons.arrow_forward_ios, size: 14),
+                          ],
+                        ),
+                        onTap: () => _irParaExecucao(itens[index]),
+                      ),
+                    );
+                  },
+                );
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 
-          if (itens.isEmpty) {
-            return Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  const Icon(Icons.check_circle_outline, size: 80, color: Colors.green),
-                  const SizedBox(height: 20),
-                  const Text('Lote de Montagem Finalizado!', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-                  const SizedBox(height: 20),
-                  ElevatedButton(
-                      onPressed: () => Navigator.pop(context),
-                      child: const Text("Voltar para Lista")
-                  )
-                ],
-              ),
-            );
-          }
-
-          return ListView.builder(
-            padding: const EdgeInsets.all(10),
-            itemCount: itens.length,
-            itemBuilder: (context, index) {
-              final doc = itens[index];
-              final data = doc.data() as Map<String, dynamic>;
-              final codigo = data['idCrachaTemporario'] ?? 'Item';
-              final tipo = data['tipoAgente'] ?? '';
-
-              return Card(
-                elevation: 3,
-                margin: const EdgeInsets.only(bottom: 10),
-                child: ListTile(
-                  contentPadding: const EdgeInsets.all(12),
-                  leading: CircleAvatar(
-                    backgroundColor: Colors.deepPurple[100],
-                    child: const Icon(Icons.build, color: Colors.deepPurple),
-                  ),
-                  title: Text(codigo, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
-                  subtitle: Text('Agente: $tipo'),
-                  trailing: ElevatedButton(
-                    style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.deepPurple[700],
-                        foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12)
-                    ),
-                    onPressed: () => _abrirDialogFinalizacao(doc),
-                    child: const Text('FINALIZAR'),
-                  ),
-                ),
-              );
-            },
-          );
-        },
+  Widget _buildConcluido() {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(Icons.check_circle_rounded, size: 100, color: Colors.green.shade600),
+          const SizedBox(height: 20),
+          const Text('OS Montada e Selada!', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
+          const Text('O lote já pode seguir para a Expedição.', style: TextStyle(color: Colors.grey)),
+          const SizedBox(height: 30),
+          ElevatedButton.icon(
+            onPressed: () => Navigator.pop(context),
+            icon: const Icon(Icons.arrow_back),
+            label: const Text('VOLTAR PARA A FILA'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: corSetor,
+              foregroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+            ),
+          ),
+        ],
       ),
     );
   }

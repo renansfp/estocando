@@ -27,6 +27,10 @@ class OrdemServico {
   final DateTime? dataSaida;
   final String usuarioNomeEntrada;
 
+  // Campos para o relatório técnico
+  final String responsavelTecnico; // Quem assina o relatório
+  final String? numeroNF;          // Nº da nota fiscal de saída
+
   OrdemServico({
     required this.id,
     this.numeroOS,
@@ -37,6 +41,8 @@ class OrdemServico {
     required this.dataEntrada,
     this.dataSaida,
     required this.usuarioNomeEntrada,
+    this.responsavelTecnico = '',
+    this.numeroNF,
   });
 
   Map<String, dynamic> toJson() {
@@ -49,6 +55,8 @@ class OrdemServico {
       'dataEntrada': Timestamp.fromDate(dataEntrada),
       'dataSaida': dataSaida != null ? Timestamp.fromDate(dataSaida!) : null,
       'usuarioNomeEntrada': usuarioNomeEntrada,
+      'responsavelTecnico': responsavelTecnico,
+      'numeroNF': numeroNF,
     };
   }
 
@@ -95,6 +103,8 @@ class OrdemServico {
       dataEntrada: (json['dataEntrada'] as Timestamp? ?? Timestamp.now()).toDate(),
       dataSaida: (json['dataSaida'] as Timestamp?)?.toDate(),
       usuarioNomeEntrada: json['usuarioNomeEntrada'] ?? '---',
+      responsavelTecnico: json['responsavelTecnico'] ?? '',
+      numeroNF: json['numeroNF'],
     );
   }
 }

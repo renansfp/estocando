@@ -1,13 +1,13 @@
-// Salve como: lib/telas/producao/estacao/tela_estacao_limpeza.dart
-// (VERSÃO v3.0 - Com Reversão de Lote Admin)
+// lib/telas/producao/estacao/tela_lista_lotes_limpeza.dart
 
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:protecin_producao/provider/usuario_provider.dart'; // Import necessário
-import 'package:provider/provider.dart'; // Import necessário
-// import 'package:protecin_producao/telas/producao/estacao/tela_estacao_limpeza_detalhe.dart'; // Supondo que seja essa a tela de detalhe
+import 'package:protecin_producao/provider/usuario_provider.dart';
+import 'package:provider/provider.dart';
 import 'package:intl/intl.dart';
 import 'package:protecin_producao/telas/producao/estacao/tela_estacao_limpeza.dart';
+import 'package:protecin_producao/telas/estoque/tela_criar_requisicao.dart';
+import 'package:protecin_producao/utils/mapeador_custos.dart';
 
 class TelaListaLotesLimpeza extends StatefulWidget {
   const TelaListaLotesLimpeza({super.key});
@@ -18,28 +18,20 @@ class TelaListaLotesLimpeza extends StatefulWidget {
 
 class _TelaListaLotesLimpezaState extends State<TelaListaLotesLimpeza> {
 
-  // Função auxiliar visual
   String _obterIdCurto(String idCompleto, Map<String, dynamic> dados) {
     if (dados['numeroOS'] != null && dados['numeroOS'].toString().isNotEmpty) {
       return dados['numeroOS'];
     }
-    if (idCompleto.length >= 5) {
-      return idCompleto.substring(idCompleto.length - 5).toUpperCase();
-    }
-    return idCompleto;
+    return idCompleto.length >= 5 ? idCompleto.substring(idCompleto.length - 5).toUpperCase() : idCompleto;
   }
 
-  // --- FUNÇÃO DE REVERSÃO (ADMIN) ---
+  // FUNÇÃO DE REVERSÃO PARA ADMIN
   Future<void> _reverterParaDescarga(String osId, BuildContext context) async {
-    // Diálogo de confirmação
     final confirmou = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('⚠️ REVERTER LOTE', style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
-        content: const Text(
-          'Tem certeza que deseja devolver este lote inteiro para a etapa de DESCARGA?\n\n'
-              'Os itens sumirão desta tela e voltarão para o controle de descarga.',
-        ),
+        content: const Text('Deseja devolver este lote inteiro para a etapa de DESCARGA?'),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancelar')),
           ElevatedButton(
@@ -53,67 +45,52 @@ class _TelaListaLotesLimpezaState extends State<TelaListaLotesLimpeza> {
 
     if (confirmou != true) return;
 
-    // Executa a reversão
     try {
       final batch = FirebaseFirestore.instance.batch();
 
-      // 1. Busca itens desta OS que estão na Limpeza
+      // Busca itens que estão travados na limpeza
       final snapshot = await FirebaseFirestore.instance
           .collection('itens_os')
           .where('osId', isEqualTo: osId)
           .where('status', isEqualTo: 'aguardando_limpeza')
           .get();
 
-      if (snapshot.docs.isEmpty) {
-        if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Nenhum item encontrado para reverter.')));
-        return;
-      }
-
-      // 2. Atualiza itens para 'aguardando_descarga'
       for (var doc in snapshot.docs) {
-        batch.update(doc.reference, {
-          'status': 'aguardando_descarga',
-          // Opcional: pode remover o campo 'historico_descarga' se quiser limpar o rastro
-          // 'historico_descarga': FieldValue.delete(),
-        });
+        batch.update(doc.reference, {'status': 'aguardando_descarga'});
       }
 
-      // 3. Atualiza a OS Mãe para voltar o status
+      // Volta o status da OS principal
       final osRef = FirebaseFirestore.instance.collection('ordens_servico').doc(osId);
-      batch.update(osRef, {
-        'etapaAtual': 'descarga',
-        'statusLote': 'em_descarga',
-      });
+      batch.update(osRef, {'etapaAtual': 'descarga', 'statusLote': 'em_descarga'});
 
       await batch.commit();
-
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Lote devolvido para a Descarga!'), backgroundColor: Colors.orange),
+            const SnackBar(content: Text('Lote devolvido para a Descarga!'), backgroundColor: Colors.orange)
         );
       }
-
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Erro ao reverter: $e'), backgroundColor: Colors.red),
-        );
-      }
+      print("Erro ao reverter: $e");
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    // 1. Pega usuário para checar permissão
     final usuario = Provider.of<UsuarioProvider>(context, listen: false).usuario;
     final bool isAdmin = usuario?.permissao.toLowerCase() == 'admin' ||
         usuario?.permissao.toLowerCase() == 'administrador';
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Lotes na Limpeza (Fila)'),
+        title: const Text('Fila de Limpeza'),
         backgroundColor: const Color(0xFF1565C0),
         foregroundColor: Colors.white,
+        // BOTÃO HOME PARA VOLTAR AO INÍCIO
+        leading: IconButton(
+          icon: const Icon(Icons.home),
+          onPressed: () => Navigator.of(context).popUntil((route) => route.isFirst),
+          tooltip: 'Ir para Home',
+        ),
       ),
       body: StreamBuilder<QuerySnapshot>(
         stream: FirebaseFirestore.instance
@@ -121,11 +98,10 @@ class _TelaListaLotesLimpezaState extends State<TelaListaLotesLimpeza> {
             .orderBy('dataEntrada', descending: false)
             .snapshots(),
         builder: (context, snapshot) {
-          if (snapshot.hasError) return Center(child: Text('Erro: ${snapshot.error}'));
-          if (snapshot.connectionState == ConnectionState.waiting) return const Center(child: CircularProgressIndicator());
+          if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
 
           final lotes = snapshot.data!.docs;
-          if (lotes.isEmpty) return const Center(child: Text('Nenhuma OS encontrada.'));
+          if (lotes.isEmpty) return const Center(child: Text('Nenhuma OS na fila.'));
 
           return ListView.builder(
             padding: const EdgeInsets.all(10),
@@ -134,17 +110,8 @@ class _TelaListaLotesLimpezaState extends State<TelaListaLotesLimpeza> {
               final doc = lotes[index];
               final dados = doc.data() as Map<String, dynamic>;
               final osId = doc.id;
-              final cliente = dados['clienteNome'] ?? 'Cliente Desconhecido';
 
-              String dataFormatada = "Data N/D";
-              if (dados['dataEntrada'] != null) {
-                final timestamp = dados['dataEntrada'] as Timestamp;
-                dataFormatada = DateFormat('dd/MM HH:mm').format(timestamp.toDate());
-              }
-
-              String idVisual = _obterIdCurto(osId, dados);
-
-              // Stream interna (Caça-Fantasmas)
+              // Stream interna para contar apenas itens que realmente estão na limpeza
               return StreamBuilder<QuerySnapshot>(
                 stream: FirebaseFirestore.instance
                     .collection('itens_os')
@@ -153,83 +120,59 @@ class _TelaListaLotesLimpezaState extends State<TelaListaLotesLimpeza> {
                     .snapshots(),
                 builder: (context, itemSnapshot) {
                   if (!itemSnapshot.hasData || itemSnapshot.data!.docs.isEmpty) {
-                    return const SizedBox.shrink();
+                    return const SizedBox.shrink(); // Se não tem itens na limpeza, não mostra o card
                   }
 
-                  final itensPendentes = itemSnapshot.data!.docs.length;
+                  final totalItens = itemSnapshot.data!.docs.length;
 
                   return Card(
                     elevation: 3,
-                    margin: const EdgeInsets.symmetric(vertical: 8),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                    child: InkWell( // InkWell adiciona o efeito de clique e suporte a LongPress
-                      borderRadius: BorderRadius.circular(10),
-
-                      // --- A MÁGICA ACONTECE AQUI ---
+                    margin: const EdgeInsets.symmetric(vertical: 6),
+                    child: ListTile(
+                      // FUNÇÃO ADMIN: SEGURAR PARA REVERTER
                       onLongPress: isAdmin ? () => _reverterParaDescarga(osId, context) : null,
 
-                      onTap: () {
-                        // Navegação normal para a tela de trabalhar na limpeza
-                        Navigator.push(
+                      onTap: () => Navigator.push(
                           context,
-                          MaterialPageRoute(
-                            // Ajuste aqui para o nome da sua classe real de detalhe da limpeza
-                            builder: (context) => TelaEstacaoLimpeza(osId: osId),
-                          ),
-                        );
-                      },
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 16),
-                        child: Row(
-                          children: [
-                            // Ícone/Avatar
-                            CircleAvatar(
-                              backgroundColor: const Color(0xFF1565C0),
-                              radius: 24,
-                              child: Text(
-                                idVisual,
-                                style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold),
-                              ),
-                            ),
-                            const SizedBox(width: 16),
-                            // Texto Central
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(cliente, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-                                  const SizedBox(height: 4),
-                                  Text('Entrada: $dataFormatada', style: const TextStyle(fontSize: 12, color: Colors.grey)),
-                                  if (isAdmin)
-                                    const Text(
-                                        '(Segure para devolver)',
-                                        style: TextStyle(fontSize: 10, color: Colors.redAccent, fontStyle: FontStyle.italic)
-                                    ),
-                                ],
-                              ),
-                            ),
-                            // Contador
-                            Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                              decoration: BoxDecoration(
-                                  color: Colors.orange[100],
-                                  borderRadius: BorderRadius.circular(12),
-                                  border: Border.all(color: Colors.orange)
-                              ),
-                              child: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  const Icon(Icons.cleaning_services, size: 16, color: Colors.deepOrange),
-                                  const SizedBox(width: 6),
-                                  Text(
-                                    '$itensPendentes',
-                                    style: TextStyle(fontWeight: FontWeight.bold, color: Colors.orange[900], fontSize: 16),
+                          MaterialPageRoute(builder: (context) => TelaEstacaoLimpeza(osId: osId))
+                      ),
+
+                      leading: CircleAvatar(
+                        backgroundColor: const Color(0xFF1565C0),
+                        child: Text(_obterIdCurto(osId, dados), style: const TextStyle(fontSize: 10, color: Colors.white)),
+                      ),
+
+                      title: Text(dados['clienteNome'] ?? 'Cliente N/D', style: const TextStyle(fontWeight: FontWeight.bold)),
+
+                      subtitle: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text('$totalItens cilindros aguardando'),
+                          if (isAdmin) const Text('(Segure para reverter)', style: TextStyle(color: Colors.red, fontSize: 10, fontStyle: FontStyle.italic)),
+                        ],
+                      ),
+
+                      trailing: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          // BOTÃO DE REQUISIÇÃO (CC 4221)
+                          IconButton(
+                            icon: const Icon(Icons.shopping_cart_checkout, color: Colors.blue),
+                            onPressed: () {
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (context) => TelaCriarRequisicao(
+                                    osPrePreenchida: dados['numeroOS'] ?? osId,
+                                    ccPrePreenchido: MapeadorCustos.obterCC('DESCARGA E PREPARAÇÃO'),
+                                    subTipoPrePreenchido: 'OS',
                                   ),
-                                ],
-                              ),
-                            ),
-                          ],
-                        ),
+                                ),
+                              );
+                            },
+                          ),
+                          const Icon(Icons.chevron_right, color: Colors.grey),
+                        ],
                       ),
                     ),
                   );

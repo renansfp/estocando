@@ -1,224 +1,260 @@
-// Salve como: lib/telas/producao/estacao/tela_balanco_lote.dart
-// (VERSÃO v9.0 - VISUAL RESTAURADO + Lógica de Represa)
+// lib/telas/producao/estacao/tela_balanco_lote.dart
 
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:protecin_producao/telas/producao/estacao/tela_balanco_item.dart';
+import 'package:protecin_producao/widgets/campo_com_scanner.dart';
 
 class TelaBalancoLote extends StatefulWidget {
   final String osId;
   final List<String> filtrosAgente;
 
   const TelaBalancoLote({
-    Key? key,
+    super.key,
     required this.osId,
-    required this.filtrosAgente,
-  }) : super(key: key);
+    required this.filtrosAgente
+  });
 
   @override
-  _TelaBalancoLoteState createState() => _TelaBalancoLoteState();
+  State<TelaBalancoLote> createState() => _TelaBalancoLoteState();
 }
 
 class _TelaBalancoLoteState extends State<TelaBalancoLote> {
+  final TextEditingController _scannerController = TextEditingController();
+  bool _processandoBipe = false;
+  bool _prioridadeDescarte = true; // TRUE = Lixo / FALSE = Reuso
+
+  String _limparCodigo(String valor) {
+    String limpo = valor.trim().toUpperCase();
+    if (limpo.contains('HTTP')) {
+      limpo = limpo.split('/').last;
+    }
+    return limpo.replaceAll('R-', '');
+  }
+
+  Future<void> _processarBipeAutomatico(String codigo) async {
+    if (codigo.isEmpty || _processandoBipe) return;
+    setState(() => _processandoBipe = true);
+
+    String idCracha = _limparCodigo(codigo);
+
+    try {
+      final firestore = FirebaseFirestore.instance;
+
+      final query = await firestore
+          .collection('itens_os')
+          .where('osId', isEqualTo: widget.osId)
+          .where('idCrachaTemporario', isEqualTo: idCracha)
+          .where('status', isEqualTo: 'aguardando_descarga')
+          .limit(1)
+          .get();
+
+      if (query.docs.isNotEmpty) {
+        final docItem = query.docs.first;
+        final batch = firestore.batch();
+
+        batch.update(docItem.reference, {
+          'status': 'aguardando_limpeza',
+          'dataDescarga': FieldValue.serverTimestamp(),
+          'realizadoPor': 'operador_descarga_auto',
+        });
+
+        final queryPendentes = await firestore
+            .collection('itens_os')
+            .where('osId', isEqualTo: widget.osId)
+            .where('status', isEqualTo: 'aguardando_descarga')
+            .get();
+
+        if (queryPendentes.docs.length <= 1) {
+          final osRef = firestore.collection('ordens_servico').doc(widget.osId);
+          batch.update(osRef, {
+            'etapaAtual': 'limpeza',
+            'statusLote': 'na_limpeza',
+            'dataFimDescarga': FieldValue.serverTimestamp(),
+          });
+        }
+
+        await batch.commit();
+
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Cilindro $idCracha processado!'),
+              backgroundColor: Colors.green,
+              duration: const Duration(milliseconds: 700),
+            ),
+          );
+        }
+      } else {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Crachá não encontrado nesta OS ou já baixado.'),
+              backgroundColor: Colors.orange,
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      debugPrint("Erro no bipe: $e");
+    } finally {
+      _scannerController.clear();
+      setState(() => _processandoBipe = false);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
-    // 1. SEGURANÇA: Evita tela vermelha se o filtro vier vazio
-    if (widget.filtrosAgente.isEmpty) {
-      return Scaffold(
-        appBar: AppBar(title: const Text('Erro de Filtro')),
-        body: const Center(child: Text('Erro: Nenhum tipo de agente selecionado para filtrar.')),
-      );
-    }
-
-    final String tituloFiltro = widget.filtrosAgente
-        .map((f) => f.toUpperCase().replaceAll('_', ' '))
-        .join(' / ');
-
-    final String idVisual = widget.osId.length > 6
-        ? '${widget.osId.substring(0, 6)}...'
-        : widget.osId;
-
     return Scaffold(
       appBar: AppBar(
-        title: Text('Descarga: $tituloFiltro'),
-        backgroundColor: Colors.blueGrey,
-        bottom: PreferredSize(
-          preferredSize: const Size.fromHeight(20.0),
-          child: Text(
-            'Lote ID: $idVisual',
-            style: const TextStyle(color: Colors.white70, fontSize: 12),
-          ),
+        title: const Text('Execução de Descarga'),
+        backgroundColor: Colors.blueGrey.shade800,
+        foregroundColor: Colors.white,
+        leading: IconButton(
+          icon: const Icon(Icons.home),
+          onPressed: () => Navigator.of(context).popUntil((route) => route.isFirst),
         ),
       ),
-      body: StreamBuilder<QuerySnapshot>(
-        stream: FirebaseFirestore.instance
-            .collection('itens_os')
-            .where('osId', isEqualTo: widget.osId)
-            .where('tipoAgente', whereIn: widget.filtrosAgente)
-            .snapshots(),
-        builder: (BuildContext context, AsyncSnapshot<QuerySnapshot> snapshot) {
+      body: Column(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(12.0),
+            color: Colors.blueGrey.shade50,
+            child: CampoComScanner(
+              controller: _scannerController,
+              label: 'Bipar Crachá do Cilindro',
+              onSubmitted: _processarBipeAutomatico,
+            ),
+          ),
 
-          if (snapshot.hasError) {
-            return Center(child: Text('Erro: ${snapshot.error}'));
-          }
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const Text("Modo de Trabalho:", style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                ActionChip(
+                  avatar: Icon(_prioridadeDescarte ? Icons.delete_outline : Icons.recycling, size: 16),
+                  label: Text(_prioridadeDescarte ? "FOCO: LIXO" : "FOCO: REUSO"),
+                  onPressed: () => setState(() => _prioridadeDescarte = !_prioridadeDescarte),
+                  backgroundColor: _prioridadeDescarte ? Colors.red[50] : Colors.green[50],
+                ),
+              ],
+            ),
+          ),
 
-          if (snapshot.connectionState == ConnectionState.waiting) {
-            return const Center(child: CircularProgressIndicator());
-          }
+          if (_processandoBipe) const LinearProgressIndicator(),
 
-          // Se não veio nada ou acabou
-          if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
-            return _buildTelaConclusao(context, tituloFiltro);
-          }
+          Expanded(
+            child: StreamBuilder<QuerySnapshot>(
+              stream: FirebaseFirestore.instance
+                  .collection('itens_os')
+                  .where('osId', isEqualTo: widget.osId)
+                  .where('tipoAgente', whereIn: widget.filtrosAgente)
+                  .where('status', isEqualTo: 'aguardando_descarga')
+                  .snapshots(),
+              builder: (context, snapshot) {
+                if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
 
-          // Filtra visualmente o que ainda falta (status 'aguardando_descarga')
-          final itensParaFazer = snapshot.data!.docs.where((doc) {
-            final data = doc.data() as Map<String, dynamic>;
-            final status = data['status'] ?? '';
-            return status == 'aguardando_descarga';
-          }).toList();
+                final docs = snapshot.data!.docs;
+                if (docs.isEmpty) return _buildTelaConclusao();
 
-          // Se a lista filtrada estiver vazia, significa que todos já foram feitos
-          if (itensParaFazer.isEmpty) {
-            return _buildTelaConclusao(context, tituloFiltro);
-          }
+                return ListView.builder(
+                  padding: const EdgeInsets.all(8.0),
+                  itemCount: docs.length,
+                  itemBuilder: (context, index) {
+                    final itemData = docs[index].data() as Map<String, dynamic>;
+                    final equipId = itemData['equipamentoId'] ?? '';
 
-          // --- AQUI ESTAVA O PROBLEMA: AGORA O VISUAL VOLTOU! ---
-          return ListView.builder(
-            padding: const EdgeInsets.all(8.0),
-            itemCount: itensParaFazer.length,
-            itemBuilder: (context, index) {
-              final itemDoc = itensParaFazer[index];
-              final itemData = itemDoc.data() as Map<String, dynamic>;
-              final equipamentoId = itemData['equipamentoId'] ?? '';
+                    return FutureBuilder<DocumentSnapshot>(
+                      future: FirebaseFirestore.instance.collection('equipamentos').doc(equipId).get(),
+                      builder: (context, snapEquip) {
+                        if (!snapEquip.hasData || !snapEquip.data!.exists) return const SizedBox.shrink();
 
-              // Buscamos os dados do equipamento para montar o Card bonito
-              return FutureBuilder<DocumentSnapshot>(
-                future: FirebaseFirestore.instance.collection('equipamentos').doc(equipamentoId).get(),
-                builder: (context, snapshotEquip) {
+                        final e = snapEquip.data!.data() as Map<String, dynamic>;
+                        final String tipoAgente = (itemData['tipoAgente'] ?? '').toString().toUpperCase();
 
-                  bool deveDescartar = false;
-                  bool mostrarAvisoPo = false;
-                  bool carregando = true;
-                  String textoEquipamento = "Carregando dados...";
+                        // LÓGICA DE FILTRAGEM ATIVA
+                        bool deveDescartar = e['substituirPo'] ?? false;
 
-                  if (snapshotEquip.hasData && snapshotEquip.data!.exists) {
-                    final dataEquip = snapshotEquip.data!.data() as Map<String, dynamic>;
-                    deveDescartar = dataEquip['substituirPo'] ?? false;
+                        // Se o agente for CO2 ou Água, eles aparecem apenas no modo "Lixo" por padrão
+                        // Se for Pó, respeita o filtro do botão
+                        if (tipoAgente != 'CO2' && tipoAgente != 'AGUA' && tipoAgente != 'ESPUMA') {
+                          if (_prioridadeDescarte != deveDescartar) {
+                            return const SizedBox.shrink();
+                          }
+                        } else {
+                          if (!_prioridadeDescarte) return const SizedBox.shrink();
+                        }
 
-                    final String t = (dataEquip['tipo'] ?? '').toString().toUpperCase();
-                    mostrarAvisoPo = t.contains('ABC') || t.contains('BC') || t.contains('PQS') || t.contains('PO');
+                        String labelStatus = "";
+                        Color corAviso = Colors.grey;
+                        IconData icone = Icons.help_outline;
 
-                    final tipo = dataEquip['tipo'] ?? 'Desconhecido';
-                    final cap = dataEquip['capacidade'] ?? '';
-                    final fab = dataEquip['fabricante'] ?? '';
-                    final cil = dataEquip['numeroCilindro'] ?? '?';
+                        if (tipoAgente == 'CO2') {
+                          labelStatus = "DESCARGA DE GÁS (PESAGEM)";
+                          corAviso = Colors.blue.shade700;
+                          icone = Icons.air;
+                        } else if (tipoAgente == 'AGUA' || tipoAgente == 'ESPUMA') {
+                          labelStatus = "DESCARTAR LÍQUIDO (ESGOTO)";
+                          corAviso = Colors.orange.shade800;
+                          icone = Icons.waves;
+                        } else {
+                          labelStatus = deveDescartar ? "DESCARTAR PÓ (LIXO)" : "REUTILIZAR PÓ (PENEIRA)";
+                          corAviso = deveDescartar ? Colors.red : Colors.green.shade700;
+                          icone = deveDescartar ? Icons.delete_forever : Icons.recycling;
+                        }
 
-                    textoEquipamento = "$tipo $cap - $fab (Cil: $cil)";
-                    carregando = false;
-                  }
-
-                  // Definição de Cores e Ícones
-                  final Color corFundo = deveDescartar ? Colors.red.shade50 : Colors.green.shade50;
-                  final Color corIcone = deveDescartar ? Colors.red : Colors.green;
-                  final IconData iconeStatus = deveDescartar ? Icons.delete_forever : Icons.recycling;
-                  final String textoAcao = deveDescartar ? "DESCARTAR PÓ" : "REUTILIZAR PÓ";
-
-                  // Se não for pó, fundo branco normal
-                  final Color corFinal = (mostrarAvisoPo && !carregando) ? corFundo : Colors.white;
-
-                  return Card(
-                    color: corFinal,
-                    elevation: 2,
-                    margin: const EdgeInsets.symmetric(vertical: 6, horizontal: 4),
-                    child: ListTile(
-                      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                      leading: CircleAvatar(
-                        backgroundColor: (mostrarAvisoPo && !carregando) ? corIcone : Colors.blueGrey,
-                        radius: 25,
-                        child: carregando
-                            ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-                            : Icon((mostrarAvisoPo ? iconeStatus : Icons.fire_extinguisher), color: Colors.white, size: 28),
-                      ),
-                      title: Text(
-                        'Rastreio: ${itemData['idCrachaTemporario'] ?? "N/D"}',
-                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
-                      ),
-                      subtitle: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const SizedBox(height: 4),
-                          Text(textoEquipamento, style: TextStyle(fontSize: 15, color: Colors.grey[800], fontWeight: FontWeight.w500)),
-                          const SizedBox(height: 6),
-                          if (!carregando && mostrarAvisoPo)
-                            Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                              decoration: BoxDecoration(
-                                  color: corIcone.withOpacity(0.1),
-                                  borderRadius: BorderRadius.circular(4),
-                                  border: Border.all(color: corIcone.withOpacity(0.5))
-                              ),
-                              child: Text(textoAcao, style: TextStyle(color: corIcone, fontWeight: FontWeight.bold, fontSize: 12)),
-                            )
-                        ],
-                      ),
-                      trailing: const Icon(Icons.chevron_right),
-                      onTap: () {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (context) => TelaBalancoItem(
-                              idRastreio: itemData['idCrachaTemporario'] ?? "N/D",
-                              itemOsId: itemDoc.id,
-                              equipamentoId: equipamentoId,
-                              tipoAgente: itemData['tipoAgente'] ?? "desconhecido",
+                        return Card(
+                          elevation: 2,
+                          margin: const EdgeInsets.symmetric(vertical: 4, horizontal: 8),
+                          child: ListTile(
+                            leading: CircleAvatar(
+                              backgroundColor: corAviso,
+                              child: Icon(icone, color: Colors.white),
+                            ),
+                            title: Text(
+                                'Crachá: ${itemData['idCrachaTemporario'] ?? "N/D"}',
+                                style: const TextStyle(fontWeight: FontWeight.bold)
+                            ),
+                            subtitle: Text(
+                                labelStatus,
+                                style: TextStyle(color: corAviso, fontWeight: FontWeight.bold, fontSize: 12)
                             ),
                           ),
                         );
                       },
-                    ),
-                  );
-                },
-              );
-            },
-          );
-        },
+                    );
+                  },
+                );
+              },
+            ),
+          ),
+        ],
       ),
     );
   }
 
-  // Tela de Conclusão do Setor (Lógica da Represa)
-  Widget _buildTelaConclusao(BuildContext context, String tituloFiltro) {
+  Widget _buildTelaConclusao() {
     return Center(
       child: Padding(
-        padding: const EdgeInsets.all(30.0),
+        padding: const EdgeInsets.all(20.0),
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             const Icon(Icons.verified, size: 80, color: Colors.blue),
             const SizedBox(height: 20),
-            const Text('Setor Finalizado!', style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
+            const Text('OS Finalizada neste Setor!', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
             const SizedBox(height: 10),
-            Text(
-              'Os itens de "$tituloFiltro" já foram processados.\nAgora eles aguardam os outros setores.',
-              textAlign: TextAlign.center,
-              style: const TextStyle(fontSize: 16, color: Colors.grey),
-            ),
+            const Text('O lote foi movido automaticamente para a Limpeza.', textAlign: TextAlign.center, style: TextStyle(color: Colors.grey)),
             const SizedBox(height: 40),
             SizedBox(
               width: double.infinity,
-              height: 55,
-              child: ElevatedButton.icon(
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.blueGrey.shade700,
-                  elevation: 5,
-                ),
-                icon: const Icon(Icons.arrow_back, color: Colors.white),
-                label: const Text('VOLTAR', style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
+              height: 50,
+              child: ElevatedButton(
                 onPressed: () => Navigator.pop(context),
+                child: const Text('VOLTAR PARA A FILA'),
               ),
-            ),
+            )
           ],
         ),
       ),

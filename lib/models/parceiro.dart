@@ -22,6 +22,9 @@ class Parceiro {
 
   final String empresaId;
 
+  // Código de registro nos órgãos de fiscalização (ex: CBMERJ)
+  final String sirla;
+
   Parceiro({
     required this.id,
     required this.codigo,
@@ -34,6 +37,7 @@ class Parceiro {
     this.estado = '',
     this.cep = '',
     required this.empresaId,
+    this.sirla = '',
   });
 
   Map<String, dynamic> toJson() => {
@@ -47,6 +51,7 @@ class Parceiro {
     'estado': estado,
     'cep': cep,
     'empresaId': empresaId,
+    'sirla': sirla,
   };
 
   factory Parceiro.fromJson(Map<String, dynamic> json, String documentId) {
@@ -58,10 +63,11 @@ class Parceiro {
       cnpj: json['cnpj'] ?? '',
       telefone: json['telefone'] ?? '',
       endereco: json['endereco'] ?? '',
-      cidade: json['cidade'] ?? '',   // Evita erro se for null
-      estado: json['estado'] ?? '',   // Evita erro se for null
-      cep: json['cep'] ?? '',         // Evita erro se for null
+      cidade: json['cidade'] ?? '',
+      estado: json['estado'] ?? '',
+      cep: json['cep'] ?? '',
       empresaId: json['empresaId'] ?? '',
+      sirla: json['sirla'] ?? '',
     );
   }
 }

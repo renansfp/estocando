@@ -24,6 +24,7 @@ class _TelaCriarOSState extends State<TelaCriarOS> {
   final TextEditingController _obsController = TextEditingController();
   bool _isSaving = false;
 
+  // Substitua a função _adicionarItem inteira por esta:
   Future<void> _adicionarItem() async {
     final usuario = Provider.of<UsuarioProvider>(context, listen: false).usuario;
     if (usuario == null || _clienteSelecionado == null) {
@@ -33,6 +34,7 @@ class _TelaCriarOSState extends State<TelaCriarOS> {
       return;
     }
 
+    // Abre o diálogo para escolher o equipamento (DialogCasamento)
     final ItemOS? novoItem = await showDialog<ItemOS>(
       context: context,
       barrierDismissible: false,
@@ -40,18 +42,90 @@ class _TelaCriarOSState extends State<TelaCriarOS> {
         return DialogCasamento(
           cliente: _clienteSelecionado!,
           empresaId: usuario.empresaId,
+          itensJaAdicionados: _itensDaOS,
         );
       },
     );
 
     if (novoItem != null) {
+      // --- BLINDAGEM 1: DUPLICIDADE LOCAL (Na mesma lista) ---
+      // Verifica se o item já foi adicionado nesta tela agora
+      bool jaEstaNaLista = _itensDaOS.any((item) => item.equipamentoId == novoItem.equipamentoId);
+
+      if (jaEstaNaLista) {
+        _mostrarAlertaErro('Duplicidade Local', 'Este equipamento JÁ ESTÁ nesta lista de OS.');
+        return;
+      }
+
+      // --- BLINDAGEM 2: DUPLICIDADE GLOBAL (Em outra OS) ---
+      // Consulta o banco para ver se ele está 'ativo' ou 'em_manutencao'
+      bool estaLivre = await _verificarDisponibilidadeNoBanco(novoItem.equipamentoId);
+
+      if (!estaLivre) {
+        // Se não estiver livre, o alerta já foi exibido dentro da função de verificação
+        return;
+      }
+
+      // Se passou pelas duas barreiras, adiciona!
       setState(() {
         _itensDaOS.add(novoItem);
       });
     }
   }
 
+  // --- FUNÇÃO AUXILIAR PARA CHECAR O BANCO ---
+  Future<bool> _verificarDisponibilidadeNoBanco(String equipamentoId) async {
+    // Mostra um loading rápido para não travar a UI
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (c) => const Center(child: CircularProgressIndicator()),
+    );
+
+    try {
+      final doc = await FirebaseFirestore.instance.collection('equipamentos').doc(equipamentoId).get();
+
+      // Fecha o loading
+      Navigator.of(context).pop();
+
+      if (!doc.exists) return true; // Se não existe, teoricamente está livre (ou é erro de cadastro)
+
+      final data = doc.data() as Map<String, dynamic>;
+
+      // Verifica o status ou se tem uma OS vinculada
+      String status = data['status'] ?? 'ativo';
+      String? osAtual = data['osIdAtual'];
+
+      // REGRA: Se status for diferente de 'ativo' OU tiver um ID de OS vinculado, está ocupado!
+      if (status == 'em_manutencao' || (osAtual != null && osAtual.isNotEmpty)) {
+        _mostrarAlertaErro(
+            'Equipamento Ocupado!',
+            'Este cilindro já está na produção.\nStatus: $status\nOS Atual: ${osAtual ?? "Erro"}'
+        );
+        return false;
+      }
+
+      return true; // Está livre
+    } catch (e) {
+      Navigator.of(context).pop(); // Fecha loading no erro
+      return false; // Na dúvida, bloqueia
+    }
+  }
+
+  void _mostrarAlertaErro(String titulo, String msg) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(titulo, style: const TextStyle(color: Colors.red)),
+        content: Text(msg),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('OK'))
+        ],
+      ),
+    );
+  }
   Future<void> _finalizarOS() async {
+    // Validação Inicial
     if (_clienteSelecionado == null || _itensDaOS.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -67,70 +141,78 @@ class _TelaCriarOSState extends State<TelaCriarOS> {
     setState(() => _isSaving = true);
 
     try {
-      await FirebaseFirestore.instance.runTransaction((transaction) async {
-        // 1. Ler contador
-        final configRef = FirebaseFirestore.instance.collection('config').doc('contadores');
-        final configDoc = await transaction.get(configRef);
+      final firestore = FirebaseFirestore.instance;
 
-        int proximoNumero = 1;
-        if (configDoc.exists && configDoc.data()!.containsKey('ultima_os')) {
-          proximoNumero = configDoc.get('ultima_os') + 1;
-        }
-        final String idFormatado = proximoNumero.toString().padLeft(5, '0');
+      // 1. Criar o "Pacote" (Batch)
+      final batch = firestore.batch();
 
-        // 2. Referência da Nova OS
-        final osRef = FirebaseFirestore.instance.collection('ordens_servico').doc(idFormatado);
+      // 2. Ler o contador (Fora da transação para evitar o crash)
+      // Nota: Em sistemas gigantes isso poderia ter risco, mas para seu uso é seguro.
+      final configRef = firestore.collection('config').doc('contadores');
+      final configDoc = await configRef.get();
 
-        final novaOS = OrdemServico(
-          id: idFormatado,
-          numeroOS: idFormatado, // Garante que o número visual seja salvo
-          empresaId: usuario.empresaId,
-          clienteId: _clienteSelecionado!.id,
-          clienteNome: _clienteSelecionado!.nome,
-          statusLote: StatusLoteOS.emProducao,
-          dataEntrada: DateTime.now(),
-          usuarioNomeEntrada: usuario.nome,
-        );
+      int proximoNumero = 1;
+      if (configDoc.exists && configDoc.data() != null && configDoc.data()!.containsKey('ultima_os')) {
+        // Forçamos ser um int para garantir
+        final val = configDoc.get('ultima_os');
+        proximoNumero = (val is int ? val : int.tryParse(val.toString()) ?? 0) + 1;
+      }
+      final String idFormatado = proximoNumero.toString().padLeft(5, '0');
 
-        final osMap = novaOS.toJson();
-        // Força os campos que o app usa para exibir
-        osMap['statusLote'] = 'na_descarga';
-        osMap['etapaAtual'] = 'descarga';
-        osMap['quantidadeTotal'] = _itensDaOS.length;
-        osMap['numeroSequencial'] = proximoNumero;
-        osMap['observacoes'] = _obsController.text.trim();
+      // 3. Preparar a OS
+      final osRef = firestore.collection('ordens_servico').doc(idFormatado);
 
-        // 3. Gravar OS
-        transaction.set(osRef, osMap);
+      final novaOS = OrdemServico(
+        id: idFormatado,
+        numeroOS: idFormatado,
+        empresaId: usuario.empresaId,
+        clienteId: _clienteSelecionado!.id,
+        clienteNome: _clienteSelecionado!.nome,
+        statusLote: StatusLoteOS.emProducao,
+        dataEntrada: DateTime.now(),
+        usuarioNomeEntrada: usuario.nome,
+      );
 
-        // 4. Gravar Itens (AGORA NA COLEÇÃO RAIZ 'itens_os')
-        for (final item in _itensDaOS) {
-          // --- CORREÇÃO PRINCIPAL: Salva na raiz ---
-          final itemRef = FirebaseFirestore.instance.collection('itens_os').doc();
+      final osMap = novaOS.toJson();
+      osMap['statusLote'] = 'na_descarga';
+      osMap['etapaAtual'] = 'descarga';
+      osMap['quantidadeTotal'] = _itensDaOS.length;
+      osMap['numeroSequencial'] = proximoNumero;
+      osMap['observacoes'] = _obsController.text.trim();
 
-          final itemJson = item.toJson();
-          itemJson['osId'] = idFormatado; // VÍNCULO FUNDAMENTAL
-          itemJson['numeroOS'] = idFormatado; // Facilitador visual
-          itemJson['clienteNome'] = _clienteSelecionado!.nome;
-          itemJson['status'] = 'aguardando_descarga'; // Status inicial correto
-          itemJson['statusAtual'] = 'emProducao';
-          itemJson['dataEntrada'] = FieldValue.serverTimestamp();
+      // Adiciona a OS no pacote
+      batch.set(osRef, osMap);
 
-          transaction.set(itemRef, itemJson);
+      // 4. Preparar os Itens
+      for (final item in _itensDaOS) {
+        final itemRef = firestore.collection('itens_os').doc();
 
-          // Atualizar equipamento original (Status de ocupado)
-          final equipRef = FirebaseFirestore.instance.collection('equipamentos').doc(item.equipamentoId);
-          transaction.update(equipRef, {
-            'status': 'em_manutencao',
-            'idRastreioInterno': item.idCrachaTemporario,
-            'osIdAtual': idFormatado,
-            'itemIdAtual': itemRef.id,
-          });
-        }
+        final itemJson = item.toJson();
+        itemJson['osId'] = idFormatado;
+        itemJson['numeroOS'] = idFormatado;
+        itemJson['clienteNome'] = _clienteSelecionado!.nome;
+        itemJson['status'] = 'aguardando_descarga';
+        itemJson['statusAtual'] = 'emProducao';
+        itemJson['dataEntrada'] = FieldValue.serverTimestamp();
 
-        // 5. Atualizar contador
-        transaction.set(configRef, {'ultima_os': proximoNumero}, SetOptions(merge: true));
-      });
+        // Adiciona o item no pacote
+        batch.set(itemRef, itemJson);
+
+        // Atualizar equipamento (Usando merge para evitar crash se não existir)
+        final equipRef = firestore.collection('equipamentos').doc(item.equipamentoId);
+        batch.set(equipRef, {
+          'status': 'em_manutencao',
+          'osIdAtual': idFormatado,
+          'itemIdAtual': itemRef.id,
+        }, SetOptions(merge: true));
+      }
+
+      // 5. Atualizar o contador no pacote
+      batch.set(configRef, {'ultima_os': proximoNumero}, SetOptions(merge: true));
+
+      // --- O MOMENTO MÁGICO ---
+      // Envia tudo de uma vez para o Firebase
+      await batch.commit();
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -144,11 +226,11 @@ class _TelaCriarOSState extends State<TelaCriarOS> {
           SnackBar(content: Text('Erro ao salvar: $e'), backgroundColor: Colors.red),
         );
       }
+      print("ERRO BATCH: $e");
     } finally {
       if (mounted) setState(() => _isSaving = false);
     }
   }
-
   @override
   Widget build(BuildContext context) {
     final usuario = Provider.of<UsuarioProvider>(context, listen: false).usuario;
@@ -222,7 +304,8 @@ class _TelaCriarOSState extends State<TelaCriarOS> {
                           return ListTile(
                             visualDensity: VisualDensity.compact,
                             leading: CircleAvatar(child: Text('${index + 1}')),
-                            title: Text('${item.tipoAgente} - ${item.idCrachaTemporario}'),
+                            title: Text('${item.tipoAgente} ${item.toJson()['carga'] ?? ''}'), // Ex: PQS 4kg
+                            subtitle: Text('Crachá: ${item.idCrachaTemporario}'),
                             trailing: IconButton(icon: const Icon(Icons.delete, color: Colors.red), onPressed: () => setState(() => _itensDaOS.removeAt(index))),
                           );
                         },

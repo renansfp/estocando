@@ -1,5 +1,5 @@
-// Salve como: lib/telas/producao/tela_cadastro_equipamento.dart
-// (VERSÃO v13.0 - COMPLETA: Lógica de Alerta + Campos de Data/Origem)
+// lib/telas/producao/tela_cadastro_equipamento.dart
+// (VERSÃO v13.1 - CORRIGIDA: Lógica de Alerta Reativa)
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
@@ -47,7 +47,7 @@ class _TelaCadastroEquipamentoState extends State<TelaCadastroEquipamento> {
   final _anoFabController = TextEditingController();
   final _ultimoTHController = TextEditingController();
   final _ultimaRecargaController = TextEditingController();
-  final _ultimaTrocaPoController = TextEditingController(); // IMPORTANTE
+  final _ultimaTrocaPoController = TextEditingController();
 
   // Pó Químico
   final _lotePoController = TextEditingController();
@@ -106,58 +106,52 @@ class _TelaCadastroEquipamentoState extends State<TelaCadastroEquipamento> {
     super.dispose();
   }
 
-  // --- O CÉREBRO DA REGRA DE PÓ (Sinal Verde/Amarelo/Vermelho) ---
+  // --- CORREÇÃO DA LÓGICA DE PÓ ---
   void _calcularNecessidadeTrocaPo() {
     if (!_isTipoPo()) return;
 
     bool deveTrocar = false;
-    int nivelAlerta = 0; // 0=Verde, 1=Amarelo, 2=Vermelho
-    final anoAtual = DateTime.now().year;
+    int nivelAlerta = 0;
+    final agora = DateTime.now();
 
     // REGRA 1: Se veio de TERCEIROS, a troca é OBRIGATÓRIA
     if (_origemSelo == 'TERCEIROS') {
       deveTrocar = true;
       nivelAlerta = 2; // Vermelho
     }
-    // REGRA 2: Se é NOSSO ou FÁBRICA
+    // REGRA 2: Verificação por Datas
     else {
-      int? anoReferenciaPo;
       try {
-        if (_origemSelo == 'FABRICA') {
-          if (_anoFabController.text.length >= 7) {
-            anoReferenciaPo = int.parse(_anoFabController.text.split('/').last);
-          }
-        } else {
-          // Origem NOSSA
-          if (_ultimaTrocaPoController.text.length >= 7) {
-            anoReferenciaPo = int.parse(_ultimaTrocaPoController.text.split('/').last);
-          } else if (_anoFabController.text.length >= 7) {
-            // Se nunca trocou, considera a fabricação
-            anoReferenciaPo = int.parse(_anoFabController.text.split('/').last);
+        int? mesRef;
+        int? anoRef;
+
+        if (_origemSelo == 'FABRICA' && _anoFabController.text.length >= 7) {
+          mesRef = int.parse(_anoFabController.text.split('/').first);
+          anoRef = int.parse(_anoFabController.text.split('/').last);
+        } else if (_ultimaTrocaPoController.text.length >= 7) {
+          mesRef = int.parse(_ultimaTrocaPoController.text.split('/').first);
+          anoRef = int.parse(_ultimaTrocaPoController.text.split('/').last);
+        }
+
+        if (anoRef != null && mesRef != null) {
+          // Cálculo preciso de meses de diferença
+          int mesesDiferenca = (agora.year * 12 + agora.month) - (anoRef * 12 + mesRef);
+
+          if (mesesDiferenca >= 60) { // 5 anos ou mais
+            deveTrocar = true;
+            nivelAlerta = 2; // Vermelho
+          } else if (mesesDiferenca >= 48) { // 4 anos
+            deveTrocar = false;
+            nivelAlerta = 1; // Amarelo
+          } else {
+            deveTrocar = false;
+            nivelAlerta = 0; // Verde
           }
         }
       } catch (e) {}
-
-      if (anoReferenciaPo != null) {
-        int idadePo = anoAtual - anoReferenciaPo;
-
-        if (idadePo >= 5) {
-          // VENCEU (5 anos ou mais) -> TROCA
-          deveTrocar = true;
-          nivelAlerta = 2; // Vermelho
-        } else if (idadePo == 4) {
-          // QUASE VENCENDO (4 anos) -> ATENÇÃO (Mas permite reutilizar)
-          deveTrocar = false;
-          nivelAlerta = 1; // Amarelo
-        } else {
-          // NOVO (0 a 3 anos) -> REUTILIZA
-          deveTrocar = false;
-          nivelAlerta = 0; // Verde
-        }
-      }
     }
 
-    // Atualiza a tela se algo mudou
+    // Atualiza a tela reativamente
     if (_substituirPo != deveTrocar || _statusAlertaPo != nivelAlerta) {
       setState(() {
         _substituirPo = deveTrocar;
@@ -237,7 +231,6 @@ class _TelaCadastroEquipamentoState extends State<TelaCadastroEquipamento> {
     if (carga == null) return;
     setState(() {
       _cargaSelecionada = carga;
-      // Ao trocar o tipo de carga, recalcula se precisa trocar pó
       Future.delayed(Duration.zero, _calcularNecessidadeTrocaPo);
     });
 
@@ -284,8 +277,6 @@ class _TelaCadastroEquipamentoState extends State<TelaCadastroEquipamento> {
       _anoFabController.text = e.anoFabricacao;
       _ultimoTHController.text = e.anoUltimoTH ?? '';
       _ultimaRecargaController.text = e.ultimaRecarga ?? '';
-
-      // Carrega a data da troca do pó
       _ultimaTrocaPoController.text = e.ultimaTrocaPo ?? '';
 
       _normaController.text = e.normaFabricacao;
@@ -316,6 +307,9 @@ class _TelaCadastroEquipamentoState extends State<TelaCadastroEquipamento> {
         _tipoSelecionado = e.tipo;
         _cargaSelecionada = e.capacidade;
       }
+
+      // Chama cálculo após carregar dados de edição
+      WidgetsBinding.instance.addPostFrameCallback((_) => _calcularNecessidadeTrocaPo());
     } else {
       if (widget.clientePreSelecionado != null) _clienteSelecionado = widget.clientePreSelecionado;
       if (widget.numeroCascoPreenchido != null) _ativoFixoController.text = widget.numeroCascoPreenchido!;
@@ -399,7 +393,6 @@ class _TelaCadastroEquipamentoState extends State<TelaCadastroEquipamento> {
         lotePo: _isTipoPo() ? _lotePoController.text.trim() : null,
         substituirPo: _isTipoPo() ? _substituirPo : false,
 
-        // Salva a origem apenas se for pó (ou salva sempre, mas o input só aparece se for pó)
         origemSelo: _isTipoPo() ? _origemSelo : null,
         ultimaTrocaPo: _isTipoPo() ? _ultimaTrocaPoController.text.trim() : null,
 
@@ -457,7 +450,6 @@ class _TelaCadastroEquipamentoState extends State<TelaCadastroEquipamento> {
                 ),
               const Divider(),
 
-              // --- DADOS TÉCNICOS ---
               Card(
                 color: Colors.blueGrey.shade50,
                 elevation: 2,
@@ -524,7 +516,6 @@ class _TelaCadastroEquipamentoState extends State<TelaCadastroEquipamento> {
               ),
               const SizedBox(height: 12),
 
-              // --- DATAS E NORMA ---
               Row(
                 children: [
                   Expanded(child: TextFormField(
@@ -560,7 +551,6 @@ class _TelaCadastroEquipamentoState extends State<TelaCadastroEquipamento> {
                   decoration: const InputDecoration(labelText: 'Nº Pintura (Opcional)', border: OutlineInputBorder())
               ),
 
-              // --- SEÇÃO DE PÓ QUÍMICO COMPLETA ---
               if (_isTipoPo()) ...[
                 const SizedBox(height: 20),
                 const Divider(thickness: 2),
@@ -569,7 +559,6 @@ class _TelaCadastroEquipamentoState extends State<TelaCadastroEquipamento> {
                   child: Text("GESTÃO DO AGENTE EXTINTOR", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.blueGrey)),
                 ),
 
-                // 1. Origem
                 DropdownButtonFormField<String>(
                   value: _origemSelo,
                   decoration: InputDecoration(
@@ -586,7 +575,8 @@ class _TelaCadastroEquipamentoState extends State<TelaCadastroEquipamento> {
                   ],
                   onChanged: (v) {
                     if (v != null) {
-                      setState(() => _origemSelo = v);
+                      // Correção: Atualiza a variável antes do cálculo
+                      _origemSelo = v;
                       _calcularNecessidadeTrocaPo();
                     }
                   },
@@ -594,7 +584,6 @@ class _TelaCadastroEquipamentoState extends State<TelaCadastroEquipamento> {
 
                 const SizedBox(height: 12),
 
-                // 2. Data da Troca do Pó
                 TextFormField(
                   controller: _ultimaTrocaPoController,
                   inputFormatters: [_dataMask],
@@ -609,7 +598,6 @@ class _TelaCadastroEquipamentoState extends State<TelaCadastroEquipamento> {
 
                 const SizedBox(height: 12),
 
-                // 3. Alerta Visual (Sinal Verde/Amarelo/Vermelho)
                 Container(
                   padding: const EdgeInsets.all(10),
                   decoration: BoxDecoration(
@@ -678,7 +666,7 @@ class _TelaCadastroEquipamentoState extends State<TelaCadastroEquipamento> {
                               ),
                               value: _substituirPo,
                               onChanged: _statusAlertaPo == 2
-                                  ? null // Trava se for obrigatório
+                                  ? null
                                   : (v) => setState(() => _substituirPo = v),
                             ),
                           ),

@@ -1,99 +1,97 @@
-// Salve como: lib/telas/producao/tela_lista_lotes_th.dart
-
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
-import 'package:intl/intl.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:provider/provider.dart';
 import 'package:protecin_producao/provider/usuario_provider.dart';
 import 'package:protecin_producao/telas/producao/estacao/tela_estacao_th.dart';
-import 'package:provider/provider.dart';
 
 class TelaListaLotesTH extends StatelessWidget {
   const TelaListaLotesTH({super.key});
 
   @override
   Widget build(BuildContext context) {
+    final Color corSetor = Colors.purple.shade700;
     final usuario = Provider.of<UsuarioProvider>(context).usuario;
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Lotes em TH (Aguardando)'),
-        backgroundColor: Colors.blue.shade900,
+        title: const Text('Fila: Teste Hidrostático'),
+        backgroundColor: corSetor,
         foregroundColor: Colors.white,
       ),
       body: StreamBuilder<QuerySnapshot>(
         stream: FirebaseFirestore.instance
-            .collection('ordens_servico')
-            .where('statusLote', isNotEqualTo: 'finalizada')
-            .orderBy('statusLote')
-            .orderBy('dataEntrada', descending: false)
+            .collection('itens_os')
+            .where('roteiro', arrayContains: 'th')
             .snapshots(),
         builder: (context, snapshot) {
           if (snapshot.hasError) return Center(child: Text('Erro: ${snapshot.error}'));
           if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
 
-          final lotes = snapshot.data!.docs;
+          final docs = snapshot.data!.docs;
 
-          if (lotes.isEmpty) {
-            return const Center(child: Text('Nenhuma OS em produção.'));
+          Map<String, List<DocumentSnapshot>> agrupadosPorOS = {};
+          for (var doc in docs) {
+            final dados = doc.data() as Map<String, dynamic>?;
+            if (dados == null || !dados.containsKey('osId')) continue;
+
+            String osId = dados['osId'].toString();
+            if (!agrupadosPorOS.containsKey(osId)) agrupadosPorOS[osId] = [];
+            agrupadosPorOS[osId]!.add(doc);
+          }
+
+          List<String> osAtivas = agrupadosPorOS.keys.where((osId) {
+            return agrupadosPorOS[osId]!.any((doc) => doc['status'] == 'aguardando_th');
+          }).toList();
+
+          if (osAtivas.isEmpty) {
+            return const Center(child: Text('Nenhum extintor pendente de TH.'));
           }
 
           return ListView.builder(
-            itemCount: lotes.length,
-            padding: const EdgeInsets.all(16),
+            padding: const EdgeInsets.all(12),
+            itemCount: osAtivas.length,
             itemBuilder: (context, index) {
-              final doc = lotes[index];
-              final lote = doc.data() as Map<String, dynamic>;
-              final osId = doc.id;
+              String osId = osAtivas[index];
+              List<DocumentSnapshot> itensDaEtapa = agrupadosPorOS[osId]!;
 
-              String dataFormatada = '---';
-              var campoData = lote['dataEntrada'] ?? lote['dataAbertura'];
-              if (campoData != null && campoData is Timestamp) {
-                dataFormatada = DateFormat('dd/MM HH:mm').format(campoData.toDate());
-              }
+              int totalVaoPassar = itensDaEtapa.length;
+              int jaPassaramOuEstao = itensDaEtapa.where((doc) {
+                String st = doc['status']?.toString() ?? '';
+                return st != 'aguardando_limpeza' && st != 'em_limpeza' && st != 'aguardando_lixa';
+              }).length;
 
-              // Busca itens desta OS que estão parados no TH
-              return StreamBuilder<QuerySnapshot>(
-                stream: FirebaseFirestore.instance
-                    .collection('itens_os')
-                    .where('osId', isEqualTo: osId)
-                    .where('status', isEqualTo: 'aguardando_teste_hidro')
-                    .snapshots(),
-                builder: (context, itemSnapshot) {
-                  if (!itemSnapshot.hasData || itemSnapshot.data!.docs.isEmpty) {
-                    return const SizedBox.shrink();
-                  }
+              double progresso = jaPassaramOuEstao / totalVaoPassar;
 
-                  final qtd = itemSnapshot.data!.docs.length;
-
-                  return Card(
-                    elevation: 3,
-                    margin: const EdgeInsets.only(bottom: 16),
-                    child: ListTile(
-                      leading: CircleAvatar(
-                        backgroundColor: Colors.blue.shade100,
-                        child: Icon(Icons.science, color: Colors.blue.shade900),
+              return Card(
+                elevation: 4,
+                margin: const EdgeInsets.only(bottom: 12),
+                child: ListTile(
+                  onTap: () => Navigator.push(context, MaterialPageRoute(
+                      builder: (_) => TelaEstacaoTH(
+                        // ALTERADO DE 'numeroLote' PARA 'osId' PARA TESTAR O PADRÃO
+                        osIdAtual: osId,
+                      )
+                  )),
+                  leading: CircleAvatar(
+                    backgroundColor: corSetor,
+                    child: Text('$jaPassaramOuEstao/$totalVaoPassar',
+                        style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold)),
+                  ),
+                  title: Text('Lote OS: $osId'),
+                  subtitle: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const SizedBox(height: 8),
+                      LinearProgressIndicator(
+                        value: progresso,
+                        backgroundColor: Colors.grey[200],
+                        color: jaPassaramOuEstao == totalVaoPassar ? Colors.green : corSetor,
+                        minHeight: 6,
                       ),
-                      title: Text(
-                        "${lote['numeroOS']} - ${lote['clienteNome']}",
-                        style: const TextStyle(fontWeight: FontWeight.bold),
-                      ),
-                      subtitle: Text("Entrada: $dataFormatada \n$qtd itens para testar"),
-                      trailing: const Icon(Icons.arrow_forward_ios, size: 16),
-                      onTap: () {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (_) => TelaEstacaoTH(
-                              usuarioNome: usuario?.nome ?? 'Técnico',
-                              estacaoNome: 'Bancada TH 01',
-                              osIdAtual: osId, // <--- ENVIANDO O ID DA OS
-                            ),
-                          ),
-                        );
-                      },
-                    ),
-                  );
-                },
+                    ],
+                  ),
+                  trailing: const Icon(Icons.arrow_forward_ios, size: 16),
+                ),
               );
             },
           );

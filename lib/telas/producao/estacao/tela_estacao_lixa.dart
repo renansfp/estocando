@@ -1,7 +1,7 @@
-// Salve como: lib/telas/producao/estacao/tela_estacao_lixa.dart
-
 import 'package:flutter/material.dart';
+import 'package:protecin_producao/widgets/botao_condenar.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:protecin_producao/widgets/campo_com_scanner.dart';
 
 class TelaEstacaoLixa extends StatefulWidget {
   final String osId;
@@ -12,201 +12,166 @@ class TelaEstacaoLixa extends StatefulWidget {
 }
 
 class _TelaEstacaoLixaState extends State<TelaEstacaoLixa> {
-  final Color _corSetor = Colors.blueGrey[700]!;
+  final Color _corSetor = Colors.blueGrey.shade700;
+  final TextEditingController _scannerController = TextEditingController();
+  bool _processando = false;
+
+  String _limparCodigo(String valor) {
+    String limpo = valor.trim().toUpperCase();
+    if (limpo.contains('HTTP')) limpo = limpo.split('/').last;
+    return limpo.replaceAll('R-', '');
+  }
 
   Future<void> _confirmarLixamento(DocumentSnapshot itemDoc) async {
+    if (_processando) return;
+    setState(() => _processando = true);
+
     try {
       final dados = itemDoc.data() as Map<String, dynamic>;
       final codigo = dados['idCrachaTemporario'] ?? '???';
-      final tipoAgente = dados['tipoAgente']?.toString().toUpperCase() ?? '';
+      final List<String> roteiro = List<String>.from(dados['roteiro'] ?? []);
 
-      // Verifica dados da triagem para saber do TH
-      final triagem = dados['triagem'] as Map<String, dynamic>? ?? {};
-      final bool testeVencido = triagem['testeVencido'] == true;
-
-      // --- A LÓGICA DE SEPARAÇÃO (O GUARDA DE TRÂNSITO) ---
-
-      String proximoStatus;
-      String nomeProximaEtapa;
-
-      // Verifica se é CO2 (ou Dióxido)
-      bool isCO2 = tipoAgente.contains('CO') || tipoAgente.contains('DIOXIDO');
-
-      if (isCO2) {
-        // CAMINHO DO CO2: Sempre vai para a bancada de válvula primeiro
-        proximoStatus = 'aguardando_manutencao_valvula';
-        nomeProximaEtapa = 'MANUTENÇÃO DE VÁLVULA';
-      } else {
-        // CAMINHO DO PQS/ÁGUA: Pula válvula dedicada.
-        // Decide entre TH ou Pintura.
-        if (testeVencido) {
-          proximoStatus = 'aguardando_teste_hidro';
-          nomeProximaEtapa = 'TESTE HIDROSTÁTICO';
-        } else {
-          proximoStatus = 'aguardando_pintura';
-          nomeProximaEtapa = 'PINTURA';
-        }
+      // LÓGICA DO ROTEIRO: Descobre o próximo passo baseado no DNA do item
+      int indexLixa = roteiro.indexOf('lixa');
+      if (indexLixa == -1 || indexLixa >= roteiro.length - 1) {
+        throw 'Erro: Próxima etapa não encontrada no roteiro.';
       }
 
-      await FirebaseFirestore.instance.collection('itens_os').doc(itemDoc.id).update({
+      String proximaEstacao = roteiro[indexLixa + 1];
+      String proximoStatus = 'aguardando_$proximaEstacao';
+
+      final firestore = FirebaseFirestore.instance;
+      final batch = firestore.batch();
+
+      // 1. Atualiza o item individual
+      batch.update(itemDoc.reference, {
         'status': proximoStatus,
-        'statusAtual': 'emProducao',
-        'etapa': 'producao',
         'lixa': {
           'data': FieldValue.serverTimestamp(),
           'operador': 'operador_lixa',
         }
       });
 
-      if (!mounted) return;
+      // 2. Trava de Segurança: Verifica se restam itens pendentes NA LIXA
+      final queryPendentes = await firestore
+          .collection('itens_os')
+          .where('osId', isEqualTo: widget.osId)
+          .where('status', isEqualTo: 'aguardando_lixa')
+          .get();
 
-      ScaffoldMessenger.of(context).showSnackBar(
+      // 3. Se for o último, move a OS para a próxima etapa do roteiro
+      if (queryPendentes.docs.length <= 1) {
+        final osRef = firestore.collection('ordens_servico').doc(widget.osId);
+        batch.update(osRef, {
+          'etapaAtual': proximaEstacao,
+          'dataFimLixa': FieldValue.serverTimestamp(),
+        });
+      }
+
+      await batch.commit();
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Row(
-              children: [
-                const Icon(Icons.check_circle, color: Colors.white),
-                const SizedBox(width: 10),
-                Flexible(child: Text('Item $codigo ($tipoAgente) -> Vai para $nomeProximaEtapa')),
-              ],
-            ),
-            duration: const Duration(milliseconds: 2000),
+            content: Text('Cilindro $codigo finalizado -> Seguindo para $proximaEstacao'),
             backgroundColor: Colors.green,
-          )
-      );
+            duration: const Duration(milliseconds: 1000),
+          ),
+        );
+      }
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Erro ao salvar: $e')));
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Erro: $e'), backgroundColor: Colors.red));
+    } finally {
+      if (mounted) setState(() => _processando = false);
     }
+  }
+
+  void _processarBipe(String codigo) async {
+    if (codigo.isEmpty) return;
+    String idCracha = _limparCodigo(codigo);
+
+    final query = await FirebaseFirestore.instance
+        .collection('itens_os')
+        .where('osId', isEqualTo: widget.osId)
+        .where('idCrachaTemporario', isEqualTo: idCracha)
+        .where('status', isEqualTo: 'aguardando_lixa')
+        .limit(1)
+        .get();
+
+    if (query.docs.isNotEmpty) {
+      _confirmarLixamento(query.docs.first);
+    } else {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Crachá inválido para lixa.')));
+    }
+    _scannerController.clear();
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Execução: Lixa/Jato'),
-        backgroundColor: _corSetor,
-        foregroundColor: Colors.white,
-      ),
-      body: StreamBuilder<QuerySnapshot>(
-        stream: FirebaseFirestore.instance
-            .collection('itens_os')
-            .where('osId', isEqualTo: widget.osId)
-            .where('status', isEqualTo: 'aguardando_lixa')
-            .snapshots(),
-        builder: (context, snapshot) {
-          if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
+      appBar: AppBar(title: const Text('Execução: Lixa/Jato'), backgroundColor: _corSetor, foregroundColor: Colors.white),
+      body: Column(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(12.0),
+            color: Colors.blueGrey.shade50,
+            child: CampoComScanner(controller: _scannerController, label: 'Bipar Crachá para Lixar', onSubmitted: _processarBipe),
+          ),
+          if (_processando) const LinearProgressIndicator(),
+          Expanded(
+            child: StreamBuilder<QuerySnapshot>(
+              stream: FirebaseFirestore.instance
+                  .collection('itens_os')
+                  .where('osId', isEqualTo: widget.osId)
+                  .where('status', isEqualTo: 'aguardando_lixa')
+                  .snapshots(),
+              builder: (context, snapshot) {
+                if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
+                final itens = snapshot.data!.docs;
 
-          final itens = snapshot.data!.docs;
+                if (itens.isEmpty) return _buildConcluido();
 
-          // Lixeiro Automático
-          if (itens.isEmpty) {
-            WidgetsBinding.instance.addPostFrameCallback((_) {
-              if (mounted) {
-                Navigator.of(context).pop();
-              }
-            });
-            return Container(color: Colors.white);
-          }
-
-          return ListView.builder(
-            padding: const EdgeInsets.all(12),
-            itemCount: itens.length,
-            itemBuilder: (context, index) {
-              final item = itens[index];
-              final dados = item.data() as Map<String, dynamic>;
-              final codigo = dados['idCrachaTemporario'] ?? '???';
-              final tipo = dados['tipoAgente']?.toString().toUpperCase() ?? '---';
-
-              final triagem = dados['triagem'] as Map<String, dynamic>? ?? {};
-              final bool teste = triagem['testeVencido'] == true;
-
-              // --- VISUALIZAÇÃO DO DESTINO NO CARD ---
-              bool isCO2 = tipo.contains('CO') || tipo.contains('DIOXIDO');
-
-              String textoDestino;
-              Color corDestino;
-
-              if (isCO2) {
-                textoDestino = "Vai para Manut. Válvula";
-                corDestino = Colors.teal;
-              } else if (teste) {
-                textoDestino = "Vai para Teste Hidro";
-                corDestino = Colors.purple;
-              } else {
-                textoDestino = "Vai para Pintura";
-                corDestino = Colors.brown;
-              }
-
-              return Card(
-                elevation: 4,
-                margin: const EdgeInsets.only(bottom: 12),
-                shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    side: BorderSide(color: _corSetor.withOpacity(0.3))
-                ),
-                child: Padding(
-                  padding: const EdgeInsets.all(12.0),
-                  child: Row(
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.all(12),
-                        decoration: BoxDecoration(
-                          color: Colors.blueGrey[50],
-                          shape: BoxShape.circle,
-                        ),
-                        child: Icon(Icons.build, color: _corSetor, size: 30),
-                      ),
-                      const SizedBox(width: 15),
-
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
+                return ListView.builder(
+                  padding: const EdgeInsets.all(12),
+                  itemCount: itens.length,
+                  itemBuilder: (context, index) {
+                    final item = itens[index];
+                    final d = item.data() as Map<String, dynamic>;
+                    return Card(
+                      child: ListTile(
+                        leading: Icon(Icons.build, color: _corSetor),
+                        title: Text('Crachá: ${d['idCrachaTemporario']}'),
+                        subtitle: Text('Agente: ${d['tipoAgente']}'),
+                        trailing: Row(
+                          mainAxisSize: MainAxisSize.min,
                           children: [
-                            Text('Extintor: $codigo', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
-                            Row(
-                              children: [
-                                Text('Tipo: $tipo', style: TextStyle(color: Colors.grey[700])),
-                                if (isCO2)
-                                  const Padding(
-                                    padding: EdgeInsets.only(left: 5),
-                                    child: Icon(Icons.warning, size: 14, color: Colors.orange),
-                                  )
-                              ],
-                            ),
-                            const SizedBox(height: 5),
-
-                            // Tag informativa do Destino
-                            Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                              decoration: BoxDecoration(
-                                  color: corDestino.withOpacity(0.1),
-                                  borderRadius: BorderRadius.circular(4)
-                              ),
-                              child: Text(
-                                textoDestino,
-                                style: TextStyle(
-                                    fontSize: 11,
-                                    fontWeight: FontWeight.bold,
-                                    color: corDestino
-                                ),
-                              ),
-                            )
+                            BotaoCondenar(itemDoc: item, etapa: 'lixa'),
+                            IconButton(icon: const Icon(Icons.check_circle, color: Colors.green), onPressed: () => _confirmarLixamento(item)),
                           ],
                         ),
                       ),
+                    );
+                  },
+                );
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 
-                      IconButton(
-                        onPressed: () => _confirmarLixamento(item),
-                        icon: const Icon(Icons.check_circle, size: 40),
-                        color: Colors.green,
-                        tooltip: "Pronto / Lixado",
-                      )
-                    ],
-                  ),
-                ),
-              );
-            },
-          );
-        },
+  Widget _buildConcluido() {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          const Icon(Icons.verified, size: 80, color: Colors.green),
+          const SizedBox(height: 20),
+          const Text('Etapa Lixa Concluída!', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 30),
+          ElevatedButton(onPressed: () => Navigator.pop(context), child: const Text('VOLTAR PARA A FILA')),
+        ],
       ),
     );
   }

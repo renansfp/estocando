@@ -1,140 +1,106 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:intl/intl.dart';
-import 'package:protecin_producao/telas/producao/estacao/tela_estacao_pintura.dart'; // Vamos criar a seguir
+import 'package:protecin_producao/telas/producao/estacao/tela_estacao_pintura.dart';
 
-class TelaListaLotesPintura extends StatefulWidget {
+class TelaListaLotesPintura extends StatelessWidget {
   const TelaListaLotesPintura({super.key});
 
   @override
-  State<TelaListaLotesPintura> createState() => _TelaListaLotesPinturaState();
-}
-
-class _TelaListaLotesPinturaState extends State<TelaListaLotesPintura> {
-  // Cor da Pintura (Marrom)
-  final Color _corSetor = Colors.brown[700]!;
-
-  @override
   Widget build(BuildContext context) {
+    final Color corSetor = Colors.brown.shade700;
+
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Lotes na Pintura (Estufa)'),
-        backgroundColor: _corSetor,
+        title: const Text('Fila: Pintura'),
+        backgroundColor: corSetor,
         foregroundColor: Colors.white,
       ),
       body: StreamBuilder<QuerySnapshot>(
+        // 1. Busca itens que têm 'pintura' no roteiro planejado
         stream: FirebaseFirestore.instance
-            .collection('ordens_servico')
-            .where('statusLote', isNotEqualTo: 'finalizado')
-            .orderBy('statusLote')
-            .orderBy('dataEntrada', descending: false)
-            .limit(50)
+            .collection('itens_os')
+            .where('roteiro', arrayContains: 'pintura')
             .snapshots(),
         builder: (context, snapshot) {
           if (snapshot.hasError) return Center(child: Text('Erro: ${snapshot.error}'));
-          if (snapshot.connectionState == ConnectionState.waiting) return const Center(child: CircularProgressIndicator());
+          if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
 
-          final lotes = snapshot.data!.docs;
+          final docs = snapshot.data!.docs;
 
-          if (lotes.isEmpty) return _buildEmptyState();
+          // Agrupamento por OS
+          Map<String, List<DocumentSnapshot>> agrupadosPorOS = {};
+          for (var doc in docs) {
+            final dados = doc.data() as Map<String, dynamic>?;
+            if (dados == null || !dados.containsKey('os_id') && !dados.containsKey('osId')) continue;
+
+            String osId = (dados['osId'] ?? dados['os_id']).toString();
+            if (!agrupadosPorOS.containsKey(osId)) agrupadosPorOS[osId] = [];
+            agrupadosPorOS[osId]!.add(doc);
+          }
+
+          // 2. Filtro: Só mostra se houver pelo menos um item REALMENTE aguardando pintura
+          List<String> osAtivas = agrupadosPorOS.keys.where((osId) {
+            return agrupadosPorOS[osId]!.any((doc) => doc['status'] == 'aguardando_pintura');
+          }).toList();
+
+          if (osAtivas.isEmpty) {
+            return const Center(child: Text('Nenhum extintor pendente de pintura.'));
+          }
 
           return ListView.builder(
-            padding: const EdgeInsets.all(10),
-            itemCount: lotes.length,
+            padding: const EdgeInsets.all(12),
+            itemCount: osAtivas.length,
             itemBuilder: (context, index) {
-              final doc = lotes[index];
-              final dados = doc.data() as Map<String, dynamic>;
-              final numeroOS = doc.id;
-              final cliente = dados['clienteNome'] ?? 'Cliente Desconhecido';
+              String osId = osAtivas[index];
+              List<DocumentSnapshot> itensDaOS = agrupadosPorOS[osId]!;
 
-              String dataFormatada = "Data N/D";
-              if (dados['dataEntrada'] != null) {
-                final timestamp = dados['dataEntrada'] as Timestamp;
-                dataFormatada = DateFormat('dd/MM HH:mm').format(timestamp.toDate());
-              }
+              // Contador com Memória
+              int totalVaoPintar = itensDaOS.length;
 
-              // --- CAÇA-FANTASMAS DA PINTURA 🎨 ---
-              return StreamBuilder<QuerySnapshot>(
-                stream: FirebaseFirestore.instance
-                    .collection('itens_os')
-                    .where('osId', isEqualTo: numeroOS)
-                    .where('status', isEqualTo: 'aguardando_pintura') // Filtro da Pintura
-                    .snapshots(),
-                builder: (context, itemSnapshot) {
-                  if (!itemSnapshot.hasData) return const SizedBox.shrink();
+              // Considera processado se o status já passou da pintura (ex: recarga, estanqueidade)
+              int jaPassaramOuEstao = itensDaOS.where((doc) {
+                String st = doc['status']?.toString() ?? '';
+                return st != 'aguardando_limpeza' &&
+                    st != 'aguardando_lixa' &&
+                    st != 'aguardando_th' &&
+                    st != 'aguardando_manutencao_valvula';
+              }).length;
 
-                  final itensPendentes = itemSnapshot.data!.docs.length;
+              double progresso = jaPassaramOuEstao / totalVaoPintar;
 
-                  if (itensPendentes == 0) return const SizedBox.shrink();
-
-                  return Card(
-                    elevation: 3,
-                    margin: const EdgeInsets.symmetric(vertical: 8),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                    child: ListTile(
-                      contentPadding: const EdgeInsets.symmetric(vertical: 10, horizontal: 16),
-                      leading: CircleAvatar(
-                        backgroundColor: _corSetor,
-                        radius: 25,
-                        child: Text(
-                          numeroOS.length >= 3 ? numeroOS.substring(numeroOS.length - 2) : '#',
-                          style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
-                        ),
+              return Card(
+                elevation: 4,
+                margin: const EdgeInsets.only(bottom: 12),
+                child: ListTile(
+                  onTap: () => Navigator.push(context, MaterialPageRoute(
+                      builder: (_) => TelaEstacaoPintura(osId: osId)
+                  )),
+                  leading: CircleAvatar(
+                    backgroundColor: corSetor,
+                    child: Text('$jaPassaramOuEstao/$totalVaoPintar',
+                        style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold)),
+                  ),
+                  title: Text('Lote OS: $osId'),
+                  subtitle: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const SizedBox(height: 8),
+                      LinearProgressIndicator(
+                        value: progresso,
+                        backgroundColor: Colors.grey[200],
+                        color: jaPassaramOuEstao == totalVaoPintar ? Colors.green : corSetor,
+                        minHeight: 6,
                       ),
-                      title: Text(
-                        'Lote: $numeroOS',
-                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
-                      ),
-                      subtitle: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(cliente, maxLines: 1, overflow: TextOverflow.ellipsis),
-                          const SizedBox(height: 8),
-                          Row(
-                            children: [
-                              Icon(Icons.format_paint, size: 14, color: _corSetor),
-                              const SizedBox(width: 4),
-                              Text(
-                                '$itensPendentes para pintar',
-                                style: TextStyle(fontWeight: FontWeight.bold, color: _corSetor),
-                              ),
-                              const Spacer(),
-                              Text(dataFormatada, style: const TextStyle(fontSize: 12, color: Colors.grey)),
-                            ],
-                          ),
-                        ],
-                      ),
-                      trailing: const Icon(Icons.arrow_forward_ios, size: 16, color: Colors.grey),
-                      onTap: () {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (context) => TelaEstacaoPintura(osId: doc.id),
-                          ),
-                        );
-                      },
-                    ),
-                  );
-                },
+                      const SizedBox(height: 4),
+                      Text(jaPassaramOuEstao == totalVaoPintar ? 'Lote pintado!' : 'Aguardando pintura...'),
+                    ],
+                  ),
+                  trailing: const Icon(Icons.format_paint, color: Colors.brown),
+                ),
               );
             },
           );
         },
-      ),
-    );
-  }
-
-  Widget _buildEmptyState() {
-    return const Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(Icons.format_paint, size: 80, color: Colors.grey),
-          SizedBox(height: 20),
-          Text('Estufa vazia. Nenhuma pintura pendente.',
-            style: TextStyle(fontSize: 18, color: Colors.grey),
-          ),
-        ],
       ),
     );
   }

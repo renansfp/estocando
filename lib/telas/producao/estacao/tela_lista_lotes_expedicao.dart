@@ -7,54 +7,85 @@ class TelaListaLotesExpedicao extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final Color corSetor = Colors.black87;
+
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Lotes: Expedição'),
-        backgroundColor: Colors.black87,
+        title: const Text('Fila: Expedição e Carregamento'),
+        backgroundColor: corSetor,
         foregroundColor: Colors.white,
       ),
       body: StreamBuilder<QuerySnapshot>(
+        // Busca todos os itens que ainda estão no processo produtivo
         stream: FirebaseFirestore.instance
             .collection('itens_os')
-            .where('status', isEqualTo: 'aguardando_expedicao')
+            .where('statusAtual', isEqualTo: 'emProducao')
             .snapshots(),
         builder: (context, snapshot) {
           if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
 
-          if (snapshot.data!.docs.isEmpty) {
-            return const Center(child: Text('Nenhum lote pronto para entrega.'));
+          final docs = snapshot.data!.docs;
+          Map<String, List<DocumentSnapshot>> agrupados = {};
+
+          for (var doc in docs) {
+            final dados = doc.data() as Map<String, dynamic>;
+            String osId = dados['osId']?.toString() ?? 'S/OS';
+            if (!agrupados.containsKey(osId)) agrupados[osId] = [];
+            agrupados[osId]!.add(doc);
           }
 
-          // Agrupa por OS
-          Map<String, int> lotes = {};
-          for (var doc in snapshot.data!.docs) {
-            final osId = doc['osId'] ?? '???';
-            lotes[osId] = (lotes[osId] ?? 0) + 1;
+          // Filtro: Só mostra OSs que tenham itens aguardando expedição (após a montagem)
+          List<String> osAtivas = agrupados.keys.where((osId) {
+            return agrupados[osId]!.any((doc) => doc['status'] == 'aguardando_expedicao');
+          }).toList();
+
+          if (osAtivas.isEmpty) {
+            return const Center(child: Text('Nenhum lote pronto para carregar.'));
           }
 
           return ListView.builder(
-            padding: const EdgeInsets.all(10),
-            itemCount: lotes.length,
+            padding: const EdgeInsets.all(12),
+            itemCount: osAtivas.length,
             itemBuilder: (context, index) {
-              final osId = lotes.keys.elementAt(index);
-              final qtd = lotes[osId];
+              String osId = osAtivas[index];
+              List<DocumentSnapshot> itensDaOS = agrupados[osId]!;
+
+              int totalItensOS = itensDaOS.length;
+
+              // Itens que já foram bipados na expedição ou finalizados
+              int processados = itensDaOS.where((doc) {
+                String st = doc['status']?.toString() ?? '';
+                return st == 'finalizado' || st == 'entregue';
+              }).length;
+
+              double progresso = processados / totalItensOS;
 
               return Card(
                 elevation: 4,
+                margin: const EdgeInsets.only(bottom: 12),
                 child: ListTile(
+                  onTap: () => Navigator.push(context, MaterialPageRoute(
+                      builder: (_) => TelaEstacaoExpedicao(osId: osId)
+                  )),
                   leading: CircleAvatar(
-                    backgroundColor: Colors.black12,
-                    child: Text('$qtd', style: const TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
+                    backgroundColor: corSetor,
+                    child: Icon(Icons.local_shipping, color: Colors.white, size: 20),
                   ),
-                  title: Text('OS: $osId'),
-                  subtitle: const Text('Pronto para Entrega'),
-                  trailing: const Icon(Icons.local_shipping), // Ícone de caminhão
-                  onTap: () {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(builder: (_) => TelaEstacaoExpedicao(osId: osId)),
-                    );
-                  },
+                  title: Text('Lote OS: $osId', style: TextStyle(fontWeight: FontWeight.bold)),
+                  subtitle: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const SizedBox(height: 8),
+                      LinearProgressIndicator(
+                        value: progresso,
+                        backgroundColor: Colors.grey[200],
+                        color: processados == totalItensOS ? Colors.green : Colors.orange,
+                      ),
+                      const SizedBox(height: 4),
+                      Text('$processados de $totalItensOS cilindros carregados'),
+                    ],
+                  ),
+                  trailing: const Icon(Icons.arrow_forward_ios, size: 16),
                 ),
               );
             },

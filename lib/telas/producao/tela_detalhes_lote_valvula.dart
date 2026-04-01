@@ -1,5 +1,5 @@
-// Salve como: lib/telas/producao/tela_detalhes_lote_valvula.dart
-// (VERSÃO CORRIGIDA - Busca na coleção raiz 'itens_os')
+// lib/telas/producao/tela_detalhes_lote_valvula.dart
+// (VERSÃO v2.0 - Corrigida com Parâmetro osId e Vínculo por Crachá)
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
@@ -31,6 +31,7 @@ class TelaDetalhesLoteValvula extends StatelessWidget {
         backgroundColor: Colors.teal[700],
         foregroundColor: Colors.white,
       ),
+      // BOTÃO DE BIPAR MANUAL (Corrigido com osId)
       floatingActionButton: FloatingActionButton.extended(
         backgroundColor: Colors.teal[700],
         icon: const Icon(Icons.qr_code_scanner, color: Colors.white),
@@ -42,18 +43,16 @@ class TelaDetalhesLoteValvula extends StatelessWidget {
               builder: (context) => TelaEstacaoManutencaoValvula(
                 usuarioNome: usuarioNome,
                 estacaoNome: 'Bancada Válvula 01',
+                osId: osId, // <--- ADICIONADO: Agora a tela de destino sabe qual OS processar
               ),
             ),
           );
         },
       ),
       body: StreamBuilder<QuerySnapshot>(
-        // --- CORREÇÃO AQUI: Busca em 'itens_os' ---
         stream: FirebaseFirestore.instance
             .collection('itens_os')
             .where('osId', isEqualTo: osId)
-        // Aqui mostramos TUDO que for CO2 ou estiver na Válvula, para ter histórico
-        // Mas para facilitar, vamos focar no que está pendente:
             .where('status', isEqualTo: 'aguardando_manutencao_valvula')
             .snapshots(),
         builder: (context, snapshot) {
@@ -72,33 +71,31 @@ class TelaDetalhesLoteValvula extends StatelessWidget {
               final doc = itens[index];
               final item = doc.data() as Map<String, dynamic>;
 
-              final codigo = item['idCrachaTemporario'] ?? '---';
+              final codigoCracha = item['idCrachaTemporario'] ?? '---';
               final tipo = item['tipoAgente'] ?? '';
 
               return Card(
                 elevation: 2,
                 child: ListTile(
                   leading: CircleAvatar(
-                    backgroundColor: Colors.teal, // Cor da Válvula
+                    backgroundColor: Colors.teal,
                     child: const Icon(Icons.build, color: Colors.white, size: 20),
                   ),
-                  title: Text("Item: $codigo"),
+                  title: Text("Item: $codigoCracha"),
                   subtitle: Text("Tipo: $tipo"),
                   trailing: const Icon(Icons.arrow_forward_ios, size: 16, color: Colors.teal),
 
                   onTap: () {
-                    // Navega simulando o Bip com o ID do equipamento (que está salvo no item)
-                    // O campo 'equipamentoId' é o ID do documento na coleção equipamentos
-                    final equipamentoId = item['equipamentoId'];
-
+                    // AO CLICAR NO ITEM DA LISTA:
                     Navigator.push(
                       context,
                       MaterialPageRoute(
                         builder: (context) => TelaEstacaoManutencaoValvula(
                           usuarioNome: usuarioNome,
                           estacaoNome: 'Bancada Válvula 01',
-                          // Passamos o ID para a tela já buscar os dados
-                          codigoPreDefinido: equipamentoId,
+                          osId: osId, // <--- ADICIONADO: Parâmetro obrigatório
+                          // PASSAMOS O CRACHÁ: Para que a tela de destino execute a busca real pelo scanner
+                          codigoPreDefinido: codigoCracha,
                         ),
                       ),
                     );

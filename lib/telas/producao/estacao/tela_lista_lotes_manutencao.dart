@@ -1,12 +1,8 @@
-// Salve como: lib/telas/producao/estacao/tela_lista_lotes_manutencao.dart
-// (VERSÃO CORRIGIDA - Busca na coleção raiz 'itens_os')
-
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 import 'package:protecin_producao/provider/usuario_provider.dart';
-import 'package:protecin_producao/telas/producao/tela_detalhes_lote_valvula.dart';
+import 'package:protecin_producao/telas/producao/estacao/tela_estacao_manutencao_valvula.dart';
 
 class TelaListaLotesManutencao extends StatefulWidget {
   const TelaListaLotesManutencao({super.key});
@@ -16,17 +12,7 @@ class TelaListaLotesManutencao extends StatefulWidget {
 }
 
 class _TelaListaLotesManutencaoState extends State<TelaListaLotesManutencao> {
-  final Color _corSetor = Colors.teal[700]!;
-
-  String _obterIdCurto(String idCompleto, Map<String, dynamic> dados) {
-    if (dados['numeroOS'] != null && dados['numeroOS'].toString().isNotEmpty) {
-      return dados['numeroOS'];
-    }
-    if (idCompleto.length >= 5) {
-      return idCompleto.substring(idCompleto.length - 5).toUpperCase();
-    }
-    return idCompleto;
-  }
+  final Color _corSetor = Colors.teal.shade700;
 
   @override
   Widget build(BuildContext context) {
@@ -34,106 +20,99 @@ class _TelaListaLotesManutencaoState extends State<TelaListaLotesManutencao> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Lotes na Válvula (CO2)'),
+        title: const Text('Fila: Manutenção de Componentes'),
         backgroundColor: _corSetor,
         foregroundColor: Colors.white,
+        leading: IconButton(
+          icon: const Icon(Icons.home),
+          onPressed: () => Navigator.of(context).popUntil((route) => route.isFirst),
+        ),
       ),
       body: StreamBuilder<QuerySnapshot>(
-        // Busca todas as OSs ativas (ordenadas pela entrada)
+        // Buscamos itens que têm 'manutencao_valvula' no roteiro
         stream: FirebaseFirestore.instance
-            .collection('ordens_servico')
-            .orderBy('dataEntrada', descending: false)
+            .collection('itens_os')
+            .where('roteiro', arrayContains: 'manutencao_valvula')
             .snapshots(),
         builder: (context, snapshot) {
           if (snapshot.hasError) return Center(child: Text('Erro: ${snapshot.error}'));
-          if (snapshot.connectionState == ConnectionState.waiting) return const Center(child: CircularProgressIndicator());
+          if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
 
-          final lotes = snapshot.data!.docs;
+          final docs = snapshot.data!.docs;
 
-          if (lotes.isEmpty) {
-            return const Center(child: Text('Nenhuma OS encontrada.'));
+          // Agrupamento Blindado por OS
+          Map<String, List<DocumentSnapshot>> agrupadosPorOS = {};
+          for (var doc in docs) {
+            final dados = doc.data() as Map<String, dynamic>?;
+            // Proteção contra dados incompletos (lixo)
+            if (dados == null || !dados.containsKey('osId')) continue;
+
+            String osId = dados['osId'].toString();
+            if (!agrupadosPorOS.containsKey(osId)) agrupadosPorOS[osId] = [];
+            agrupadosPorOS[osId]!.add(doc);
+          }
+
+          // Filtro: Só mostra a OS se houver pelo menos um item aguardando a válvula
+          List<String> osAtivas = agrupadosPorOS.keys.where((osId) {
+            return agrupadosPorOS[osId]!.any((doc) => doc['status'] == 'aguardando_manutencao_valvula');
+          }).toList();
+
+          if (osAtivas.isEmpty) {
+            return const Center(child: Text('Nenhum componente pendente de revisão.'));
           }
 
           return ListView.builder(
             padding: const EdgeInsets.all(10),
-            itemCount: lotes.length,
+            itemCount: osAtivas.length,
             itemBuilder: (context, index) {
-              final doc = lotes[index];
-              final dados = doc.data() as Map<String, dynamic>;
-              final osId = doc.id;
-              final cliente = dados['clienteNome'] ?? 'Cliente Desconhecido';
+              String osId = osAtivas[index];
+              List<DocumentSnapshot> itensDaEtapa = agrupadosPorOS[osId]!;
 
-              String dataFormatada = "---";
-              var campoData = dados['dataEntrada'];
-              if (campoData != null && campoData is Timestamp) {
-                dataFormatada = DateFormat('dd/MM HH:mm').format(campoData.toDate());
-              }
+              // CONTADOR INTELIGENTE (MEMÓRIA)
+              int totalVaoPassar = itensDaEtapa.length;
 
-              String idVisual = _obterIdCurto(osId, dados);
+              // Itens que já chegaram na válvula ou já passaram dela
+              int jaPassaramOuEstao = itensDaEtapa.where((doc) {
+                String st = doc['status']?.toString() ?? '';
+                // Não conta se ainda estiver na limpeza ou lixa
+                return st != 'aguardando_limpeza' && st != 'em_limpeza' && st != 'aguardando_lixa';
+              }).length;
 
-              // --- CAÇA-FANTASMAS DA VÁLVULA ---
-              // Correção: Agora busca em 'itens_os' filtrando pelo ID da OS
-              return StreamBuilder<QuerySnapshot>(
-                stream: FirebaseFirestore.instance
-                    .collection('itens_os') // <--- MUDANÇA AQUI
-                    .where('osId', isEqualTo: osId) // <--- VÍNCULO NOVO
-                    .where('status', isEqualTo: 'aguardando_manutencao_valvula')
-                    .snapshots(),
-                builder: (context, itemSnapshot) {
-                  // Se não tem item pendente, esconde o card
-                  if (!itemSnapshot.hasData || itemSnapshot.data!.docs.isEmpty) {
-                    return const SizedBox.shrink();
-                  }
+              double progresso = jaPassaramOuEstao / totalVaoPassar;
 
-                  final itensPendentes = itemSnapshot.data!.docs.length;
-
-                  return Card(
-                    elevation: 3,
-                    margin: const EdgeInsets.symmetric(vertical: 8),
-                    child: ListTile(
-                      contentPadding: const EdgeInsets.symmetric(vertical: 10, horizontal: 16),
-                      leading: CircleAvatar(
-                        backgroundColor: _corSetor,
-                        radius: 24,
-                        child: Text(
-                          idVisual,
-                          style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold),
-                        ),
+              return Card(
+                elevation: 4,
+                margin: const EdgeInsets.symmetric(vertical: 6),
+                child: ListTile(
+                  onTap: () => Navigator.push(context, MaterialPageRoute(builder: (ctx) => TelaEstacaoManutencaoValvula(
+                    usuarioNome: usuario?.nome ?? 'Técnico',
+                    estacaoNome: 'Manutenção de Componentes',
+                    osId: osId,
+                  ))),
+                  leading: CircleAvatar(
+                    backgroundColor: _corSetor,
+                    child: Text('$jaPassaramOuEstao/$totalVaoPassar',
+                        style: const TextStyle(fontSize: 10, color: Colors.white, fontWeight: FontWeight.bold)),
+                  ),
+                  title: Text('Lote OS: $osId', style: const TextStyle(fontWeight: FontWeight.bold)),
+                  subtitle: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const SizedBox(height: 8),
+                      LinearProgressIndicator(
+                        value: progresso,
+                        backgroundColor: Colors.grey[200],
+                        color: jaPassaramOuEstao == totalVaoPassar ? Colors.green : Colors.teal,
+                        minHeight: 6,
                       ),
-                      title: Text(cliente, style: const TextStyle(fontWeight: FontWeight.bold)),
-                      subtitle: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text('Entrada: $dataFormatada', style: const TextStyle(fontSize: 12)),
-                          const SizedBox(height: 4),
-                          Row(
-                            children: [
-                              Icon(Icons.handyman, size: 14, color: _corSetor),
-                              const SizedBox(width: 4),
-                              Text(
-                                '$itensPendentes válvulas para revisar',
-                                style: TextStyle(fontWeight: FontWeight.bold, color: _corSetor),
-                              ),
-                            ],
-                          ),
-                        ],
-                      ),
-                      trailing: const Icon(Icons.arrow_forward_ios, size: 16, color: Colors.grey),
-                      onTap: () {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (context) => TelaDetalhesLoteValvula(
-                              osId: osId,
-                              clienteNome: cliente,
-                              usuarioNome: usuario?.nome ?? 'Técnico',
-                            ),
-                          ),
-                        );
-                      },
-                    ),
-                  );
-                },
+                      const SizedBox(height: 4),
+                      Text(jaPassaramOuEstao == totalVaoPassar
+                          ? 'Todos os componentes revisados'
+                          : 'Revisando componentes do lote...'),
+                    ],
+                  ),
+                  trailing: const Icon(Icons.chevron_right),
+                ),
               );
             },
           );

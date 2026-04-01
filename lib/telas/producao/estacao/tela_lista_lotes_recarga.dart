@@ -3,13 +3,13 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:protecin_producao/telas/producao/estacao/tela_estacao_recarga.dart';
 
 class TelaListaLotesRecarga extends StatelessWidget {
-  final List<String> filtrosAgente;
   final String titulo;
+  final List<String> filtrosAgente;
 
   const TelaListaLotesRecarga({
     super.key,
-    required this.filtrosAgente,
     required this.titulo,
+    required this.filtrosAgente,
   });
 
   @override
@@ -17,74 +17,84 @@ class TelaListaLotesRecarga extends StatelessWidget {
     return Scaffold(
       appBar: AppBar(
         title: Text(titulo),
-        backgroundColor: Colors.green[700],
+        backgroundColor: Colors.green.shade700,
         foregroundColor: Colors.white,
       ),
       body: StreamBuilder<QuerySnapshot>(
         stream: FirebaseFirestore.instance
             .collection('itens_os')
-            .where('status', isEqualTo: 'aguardando_recarga')
-        // O CAÇA-FANTASMAS: Só busca itens do tipo selecionado
-            .where('tipoAgente', whereIn: filtrosAgente)
+            .where('statusAtual', isEqualTo: 'emProducao')
             .snapshots(),
         builder: (context, snapshot) {
-          if (snapshot.hasError) {
-            // Se der erro de índice, avisa (acontece quando usa whereIn pela primeira vez)
-            return Center(child: Padding(
-              padding: const EdgeInsets.all(20.0),
-              child: Text('Se aparecer erro de índice no console, crie o índice no Firebase.\nErro: ${snapshot.error}'),
-            ));
-          }
           if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
 
-          if (snapshot.data!.docs.isEmpty) {
-            return Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(Icons.compress, size: 80, color: Colors.grey[300]),
-                  const SizedBox(height: 10),
-                  Text('Nenhum item para $titulo.', style: const TextStyle(color: Colors.grey)),
-                ],
-              ),
-            );
+          final docs = snapshot.data!.docs;
+          Map<String, List<DocumentSnapshot>> agrupados = {};
+
+          for (var doc in docs) {
+            final dados = doc.data() as Map<String, dynamic>;
+            final agente = dados['tipoAgente']?.toString().toUpperCase() ?? '';
+
+            // Agrupa se o agente bater com o filtro deste setor
+            bool agenteBate = filtrosAgente.any((f) => agente.contains(f.toUpperCase()));
+
+            if (agenteBate) {
+              String id = dados['osId']?.toString() ?? 'S/OS';
+              if (!agrupados.containsKey(id)) agrupados[id] = [];
+              agrupados[id]!.add(doc);
+            }
           }
 
-          // Agrupa por OS
-          Map<String, int> lotes = {};
-          for (var doc in snapshot.data!.docs) {
-            final osId = doc['osId'] ?? '???';
-            lotes[osId] = (lotes[osId] ?? 0) + 1;
-          }
+          if (agrupados.isEmpty) return const Center(child: Text('Nenhum lote para este setor.'));
 
           return ListView.builder(
-            padding: const EdgeInsets.all(10),
-            itemCount: lotes.length,
+            padding: const EdgeInsets.all(12),
+            itemCount: agrupados.length,
             itemBuilder: (context, index) {
-              final osId = lotes.keys.elementAt(index);
-              final qtd = lotes[osId];
+              String osId = agrupados.keys.elementAt(index);
+              List<DocumentSnapshot> itensDaOS = agrupados[osId]!;
+
+              int prontos = itensDaOS.where((d) {
+                String st = d['status']?.toString().toLowerCase() ?? '';
+                return st.contains('recarga');
+              }).length;
+
+              if (prontos == 0) {
+                return const SizedBox.shrink();
+              }
 
               return Card(
+                elevation: 3,
+                margin: const EdgeInsets.only(bottom: 12),
                 child: ListTile(
                   leading: CircleAvatar(
-                    backgroundColor: Colors.green[100],
-                    child: Text('$qtd', style: TextStyle(color: Colors.green[800])),
+                    backgroundColor: prontos > 0 ? Colors.green.shade100 : Colors.grey.shade200,
+                    child: Icon(Icons.gas_meter, color: prontos > 0 ? Colors.green : Colors.grey),
                   ),
-                  title: Text('Lote: $osId'),
-                  subtitle: Text('Itens de ${titulo.replaceAll('Recarga ', '')}'),
-                  trailing: const Icon(Icons.arrow_forward),
-                  onTap: () {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => TelaEstacaoRecarga(
-                          osId: osId,
-                          filtrosAgente: filtrosAgente, // Passa o filtro adiante
-                          titulo: titulo,
+                  title: Text('Lote OS: $osId', style: const TextStyle(fontWeight: FontWeight.bold)),
+                  subtitle: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('Total do Agente na OS: ${itensDaOS.length}'),
+                      Text(
+                        'Prontos para Recarga: $prontos',
+                        style: TextStyle(
+                          color: prontos > 0 ? Colors.green.shade700 : Colors.orange.shade700,
+                          fontWeight: FontWeight.bold,
                         ),
                       ),
-                    );
-                  },
+                    ],
+                  ),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () => Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => TelaEstacaoRecarga(
+                        osId: osId,
+                        filtrosAgente: filtrosAgente, // ENVIANDO O FILTRO
+                      ),
+                    ),
+                  ),
                 ),
               );
             },

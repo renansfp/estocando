@@ -1,139 +1,99 @@
-// Salve como: lib/telas/producao/estacao/tela_lista_lotes_montagem.dart
-
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:intl/intl.dart';
-import 'package:provider/provider.dart';
-import 'package:protecin_producao/provider/usuario_provider.dart';
-// ---> MUDANÇA 1: Importar a tela de execução que criamos
-import 'tela_estacao_montagem.dart';
+import 'package:protecin_producao/telas/producao/estacao/tela_estacao_montagem.dart';
 
-class TelaListaLotesMontagem extends StatefulWidget {
+class TelaListaLotesMontagem extends StatelessWidget {
   const TelaListaLotesMontagem({super.key});
 
   @override
-  State<TelaListaLotesMontagem> createState() => _TelaListaLotesMontagemState();
-}
-
-class _TelaListaLotesMontagemState extends State<TelaListaLotesMontagem> {
-  final Color _corSetor = Colors.indigo;
-
-  String _obterIdCurto(String idCompleto, Map<String, dynamic> dados) {
-    if (dados['numeroOS'] != null && dados['numeroOS'].toString().isNotEmpty) {
-      return dados['numeroOS'];
-    }
-    if (idCompleto.length >= 5) {
-      return idCompleto.substring(idCompleto.length - 5).toUpperCase();
-    }
-    return idCompleto;
-  }
-
-  @override
   Widget build(BuildContext context) {
-    // Recupera usuário (mesmo não usando na navegação agora, é bom manter o padrão)
-    final usuario = Provider.of<UsuarioProvider>(context).usuario;
+    final Color corSetor = Colors.deepPurple.shade700;
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Lotes na Montagem'),
-        backgroundColor: _corSetor,
+        title: const Text('Fila: Montagem Final e Lacração'),
+        backgroundColor: corSetor,
         foregroundColor: Colors.white,
       ),
       body: StreamBuilder<QuerySnapshot>(
         stream: FirebaseFirestore.instance
-            .collection('ordens_servico')
-            .orderBy('dataEntrada', descending: false)
+            .collection('itens_os')
+            .where('statusAtual', isEqualTo: 'emProducao')
             .snapshots(),
         builder: (context, snapshot) {
-          if (snapshot.hasError) return Center(child: Text('Erro: ${snapshot.error}'));
-          if (snapshot.connectionState == ConnectionState.waiting) return const Center(child: CircularProgressIndicator());
+          if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
 
-          final lotes = snapshot.data!.docs;
+          final docs = snapshot.data!.docs;
+          Map<String, List<DocumentSnapshot>> agrupados = {};
 
-          if (lotes.isEmpty) {
-            return const Center(child: Text('Nenhuma OS em produção.'));
+          for (var doc in docs) {
+            final dados = doc.data() as Map<String, dynamic>;
+            // Na Protecin, TODO extintor passa pela montagem final
+            String osId = dados['osId']?.toString() ?? 'S/OS';
+            if (!agrupados.containsKey(osId)) agrupados[osId] = [];
+            agrupados[osId]!.add(doc);
+          }
+
+          // Só mostra OSs que tenham itens aguardando o SELO e LACRE
+          List<String> osAtivas = agrupados.keys.where((osId) {
+            return agrupados[osId]!.any((doc) =>
+            doc['status']?.toString().toLowerCase().replaceAll('_', '') == 'aguardandomontagem');
+          }).toList();
+
+          if (osAtivas.isEmpty) {
+            return const Center(
+                child: Text('Nenhum extintor pendente de lacração.',
+                    style: TextStyle(color: Colors.grey, fontSize: 16))
+            );
           }
 
           return ListView.builder(
-            padding: const EdgeInsets.all(10),
-            itemCount: lotes.length,
+            padding: const EdgeInsets.all(12),
+            itemCount: osAtivas.length,
             itemBuilder: (context, index) {
-              final doc = lotes[index];
-              final dados = doc.data() as Map<String, dynamic>;
-              final osId = doc.id;
-              final cliente = dados['clienteNome'] ?? 'Cliente Desconhecido';
+              String osId = osAtivas[index];
+              List<DocumentSnapshot> itensDaOS = agrupados[osId]!;
 
-              String dataFormatada = "Data N/D";
-              if (dados['dataEntrada'] != null) {
-                try {
-                  if (dados['dataEntrada'] is Timestamp) {
-                    dataFormatada = DateFormat('dd/MM HH:mm').format((dados['dataEntrada'] as Timestamp).toDate());
-                  } else {
-                    dataFormatada = dados['dataEntrada'].toString();
-                  }
-                } catch (e) {}
-              }
+              int totalParaMontar = itensDaOS.length;
+              int concluidos = itensDaOS.where((doc) {
+                String st = doc['status']?.toString().toLowerCase().replaceAll('_', '') ?? '';
+                // Considera concluído nesta etapa se já foi para expedição ou finalizado
+                return st == 'aguardandoexpedicao' || st == 'finalizado';
+              }).length;
 
-              String idVisual = _obterIdCurto(osId, dados);
+              double progresso = concluidos / totalParaMontar;
 
-              return StreamBuilder<QuerySnapshot>(
-                stream: FirebaseFirestore.instance
-                    .collection('itens_os')
-                    .where('osId', isEqualTo: osId)
-                    .where('status', isEqualTo: 'aguardando_montagem')
-                    .snapshots(),
-                builder: (context, itemSnapshot) {
-                  if (!itemSnapshot.hasData || itemSnapshot.data!.docs.isEmpty) {
-                    return const SizedBox.shrink();
-                  }
 
-                  final itensPendentes = itemSnapshot.data!.docs.length;
-
-                  return Card(
-                    elevation: 3,
-                    margin: const EdgeInsets.symmetric(vertical: 8),
-                    child: ListTile(
-                      contentPadding: const EdgeInsets.symmetric(vertical: 10, horizontal: 16),
-                      leading: CircleAvatar(
-                        backgroundColor: _corSetor,
-                        radius: 24,
-                        child: Text(
-                          idVisual,
-                          style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold),
-                        ),
+              return Card(
+                elevation: 4,
+                margin: const EdgeInsets.only(bottom: 12),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                child: ListTile(
+                  onTap: () => Navigator.push(context, MaterialPageRoute(
+                      builder: (_) => TelaEstacaoMontagem(osId: osId)
+                  )),
+                  leading: CircleAvatar(
+                    backgroundColor: progresso == 1.0 ? Colors.green : corSetor,
+                    child: Text('$concluidos/$totalParaMontar',
+                        style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold)),
+                  ),
+                  title: Text('Lote OS: $osId', style: const TextStyle(fontWeight: FontWeight.bold)),
+                  subtitle: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const SizedBox(height: 8),
+                      LinearProgressIndicator(
+                        value: progresso,
+                        backgroundColor: Colors.grey[200],
+                        color: progresso == 1.0 ? Colors.green : corSetor,
+                        minHeight: 6,
                       ),
-                      title: Text(cliente, style: const TextStyle(fontWeight: FontWeight.bold)),
-                      subtitle: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text('Entrada: $dataFormatada', style: const TextStyle(fontSize: 12)),
-                          const SizedBox(height: 4),
-                          Row(
-                            children: [
-                              Icon(Icons.build, size: 14, color: _corSetor),
-                              const SizedBox(width: 4),
-                              Text(
-                                '$itensPendentes para montar',
-                                style: TextStyle(fontWeight: FontWeight.bold, color: _corSetor),
-                              ),
-                            ],
-                          ),
-                        ],
-                      ),
-                      trailing: const Icon(Icons.arrow_forward_ios, size: 16, color: Colors.grey),
-                      // ---> MUDANÇA 2: Alterado de SnackBar para Navigator
-                      onTap: () {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            // Passamos o ID da OS para a tela que criamos agora a pouco
-                            builder: (context) => TelaEstacaoMontagem(osId: osId),
-                          ),
-                        );
-                      },
-                    ),
-                  );
-                },
+                      const SizedBox(height: 4),
+                      Text(progresso == 1.0 ? 'Pronto para Expedição' : 'Processando lacração...'),
+                    ],
+                  ),
+                  trailing: Icon(Icons.verified, color: corSetor),
+                ),
               );
             },
           );

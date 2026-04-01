@@ -1,12 +1,10 @@
-// Salve como: lib/telas/producao/estacao/tela_estacao_expedicao.dart
-// (VERSÃO v3.0 - Atualiza o Cadastro do Equipamento ao Finalizar)
-
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:intl/intl.dart';
+import 'package:protecin_producao/widgets/campo_com_scanner.dart';
 
 class TelaEstacaoExpedicao extends StatefulWidget {
   final String osId;
+
   const TelaEstacaoExpedicao({super.key, required this.osId});
 
   @override
@@ -14,154 +12,197 @@ class TelaEstacaoExpedicao extends StatefulWidget {
 }
 
 class _TelaEstacaoExpedicaoState extends State<TelaEstacaoExpedicao> {
+  final TextEditingController _scannerController = TextEditingController();
+  bool _carregando = false;
 
-  Future<void> _expedirItem(String docId, String codigo) async {
+  String _limparCodigo(String valor) {
+    String limpo = valor.trim().toUpperCase();
+    if (limpo.contains('HTTP')) limpo = limpo.split('/').last;
+    return limpo.replaceAll('R-', '');
+  }
+
+  Future<void> _processarBipe(String codigo) async {
+    if (codigo.isEmpty || _carregando) return;
+    setState(() => _carregando = true);
+
+    String idCracha = _limparCodigo(codigo);
+
     try {
-      // 1. Ler os dados completos do Item para saber o que foi feito
-      final docSnapshot = await FirebaseFirestore.instance.collection('itens_os').doc(docId).get();
-      final dataItem = docSnapshot.data() as Map<String, dynamic>;
-      final equipamentoId = dataItem['equipamentoId'];
+      final firestore = FirebaseFirestore.instance;
 
-      // Preparar Batch (Pacote de atualizações) para ser seguro
-      WriteBatch batch = FirebaseFirestore.instance.batch();
+      // 1. Busca o item que está aguardando expedição
+      final query = await firestore
+          .collection('itens_os')
+          .where('osId', isEqualTo: widget.osId)
+          .where('idCrachaTemporario', isEqualTo: idCracha)
+          .where('status', isEqualTo: 'aguardando_expedicao')
+          .limit(1)
+          .get();
 
-      // --- A. ATUALIZA O ITEM DA OS (FINALIZAÇÃO) ---
-      final itemRef = FirebaseFirestore.instance.collection('itens_os').doc(docId);
-      batch.update(itemRef, {
-        'status': 'finalizado',
-        'statusAtual': 'finalizado', // Tira da contagem da Home
-        'expedicao': {
-          'data': Timestamp.now(),
-          'operador': 'operador_expedicao', // Aqui você pode por o usuario logado
-        }
-      });
+      if (query.docs.isNotEmpty) {
+        final docItem = query.docs.first;
+        final dadosItem = docItem.data() as Map<String, dynamic>;
+        final String? equipId = dadosItem['equipamentoId'];
+        final batch = firestore.batch();
 
-      // --- B. ATUALIZA O CADASTRO DO EQUIPAMENTO (MEMÓRIA LONGO PRAZO) ---
-      if (equipamentoId != null) {
-        final equipRef = FirebaseFirestore.instance.collection('equipamentos').doc(equipamentoId);
+        // A. ATUALIZA O ITEM DA OS (Filho)
+        batch.update(docItem.reference, {
+          'status': 'entregue',
+          'statusAtual': 'finalizado', // Sai da query do dashboard
+          'dataExpedicao': FieldValue.serverTimestamp(),
+        });
 
-        Map<String, dynamic> atualizacoesEquip = {
-          'ultimaRecarga': DateFormat('MM/yyyy').format(DateTime.now()), // Sempre atualiza recarga
-          'status': 'ativo', // Garante que volta a ficar ativo se estava em manutenção
-        };
+        // B. ATUALIZA O EQUIPAMENTO (Pai) - O SEU "FIX" ESTÁ AQUI
+        if (equipId != null && equipId.isNotEmpty) {
+          final equipRef = firestore.collection('equipamentos').doc(equipId);
 
-        // 1. Atualiza TH se foi feito
-        final tipoServico = (dataItem['tipoServico'] ?? '').toString().toUpperCase();
-        if (tipoServico.contains('TH') || tipoServico.contains('HIDRO')) {
-          atualizacoesEquip['anoUltimoTH'] = DateFormat('yyyy').format(DateTime.now());
-        }
+          batch.update(equipRef, {
+            'status': 'ativo',            // Deixa livre para nova OS
+            'osIdAtual': FieldValue.delete(), // Remove o vínculo da OS antiga
+            'itemIdAtual': FieldValue.delete(), // Remove o vínculo do Item antigo
 
-        // 2. Atualiza Lote de Pó se houve troca
-        final dadosRecarga = dataItem['recarga'] as Map<String, dynamic>?;
-        if (dadosRecarga != null) {
-          if (dadosRecarga['tipo'] == 'TROCA_PO') {
-            // Salva o novo lote no cadastro
-            atualizacoesEquip['lotePo'] = dadosRecarga['loteNumero'] ?? 'LOTE_MANUAL';
-            // IMPORTANTE: Reseta a flag de substituir, pois já substituímos!
-            atualizacoesEquip['substituirPo'] = false;
-          }
+            // GATILHO DE DATAS: Aproveitamos para atualizar a última recarga no cadastro mestre
+            'ultimaRecarga': "${DateTime.now().month.toString().padLeft(2, '0')}/${DateTime.now().year}",
+          });
         }
 
-        batch.update(equipRef, atualizacoesEquip);
-      }
+        // 3. Verifica se era o último item do lote
+        final queryPendentes = await firestore
+            .collection('itens_os')
+            .where('osId', isEqualTo: widget.osId)
+            .where('status', isEqualTo: 'aguardando_expedicao')
+            .get();
 
-      // Executa tudo de uma vez
-      await batch.commit();
+        // Se restava apenas 1 (este que estamos processando), fecha a OS
+        if (queryPendentes.docs.length <= 1) {
+          final osRef = firestore.collection('ordens_servico').doc(widget.osId);
+          batch.update(osRef, {
+            'etapaAtual': 'finalizado',
+            'statusLote': 'entregue_ao_cliente',
+            'dataEncerramento': FieldValue.serverTimestamp(),
+          });
+        }
 
-      // 2. Verifica se a OS inteira acabou (Auto-Fechamento da OS)
-      await _verificarFechamentoOS();
+        final queryCracha = await firestore.collection('crachas')
+            .where('idCracha', isEqualTo: idCracha) // idCracha é o nome dele, ex: R-101
+            .limit(1)
+            .get();
 
-      if(mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Item $codigo expedido e cadastro atualizado!'), backgroundColor: Colors.black87)
-        );
+        if (queryCracha.docs.isNotEmpty) {
+          final crachaRef = queryCracha.docs.first.reference;
+          batch.update(crachaRef, {
+            'status': 'disponivel', // Libera para a próxima OS
+            'itemOsIdAtual': FieldValue.delete(),
+            'osIdAtual': FieldValue.delete(),
+          });
+        }
+
+        await batch.commit();
+        _notificar('Item $idCracha carregado!', Colors.green);
+      } else {
+        _notificar('Crachá inválido ou já expedido.', Colors.orange);
       }
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Erro: $e'), backgroundColor: Colors.red));
+      _notificar('Erro: $e', Colors.red);
+    } finally {
+      _scannerController.clear();
+      setState(() => _carregando = false);
     }
   }
 
-  Future<void> _verificarFechamentoOS() async {
-    // Conta quantos itens ainda não estão finalizados nessa OS
-    final pendentes = await FirebaseFirestore.instance
-        .collection('itens_os')
-        .where('osId', isEqualTo: widget.osId)
-        .where('status', isNotEqualTo: 'finalizado')
-        .get();
-
-    if (pendentes.docs.isEmpty) {
-      // Se não tem pendentes, fecha a OS Principal
-      await FirebaseFirestore.instance.collection('ordens_servico').doc(widget.osId).update({
-        'statusLote': 'finalizada',
-        'dataSaida': FieldValue.serverTimestamp(),
-        'etapaAtual': 'finalizada',
-      });
-    }
+  void _notificar(String msg, Color cor) {
+    ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(msg), backgroundColor: cor, duration: const Duration(milliseconds: 700))
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Estação: Expedição Final'),
+        title: Text('Expedição: OS ${widget.osId}'),
         backgroundColor: Colors.black87,
         foregroundColor: Colors.white,
       ),
-      body: StreamBuilder<QuerySnapshot>(
-        stream: FirebaseFirestore.instance
-            .collection('itens_os')
-            .where('osId', isEqualTo: widget.osId)
-            .where('status', isEqualTo: 'aguardando_expedicao')
-            .snapshots(),
-        builder: (context, snapshot) {
-          if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
-          final itens = snapshot.data!.docs;
+      body: Column(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(12.0),
+            color: Colors.grey.shade200,
+            child: CampoComScanner(
+              controller: _scannerController,
+              label: 'Bipar para Carregamento no Veículo',
+              onSubmitted: _processarBipe,
+            ),
+          ),
+          if (_carregando) const LinearProgressIndicator(),
 
-          if (itens.isEmpty) {
-            Future.delayed(Duration.zero, () { if (mounted) Navigator.pop(context); });
-            return const Center(child: Text('OS Finalizada!'));
-          }
+          Expanded(
+            child: StreamBuilder<QuerySnapshot>(
+              stream: FirebaseFirestore.instance
+                  .collection('itens_os')
+                  .where('osId', isEqualTo: widget.osId)
+                  .snapshots(),
+              builder: (context, snapshot) {
+                if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
 
-          return ListView.builder(
-            itemCount: itens.length,
-            padding: const EdgeInsets.all(10),
-            itemBuilder: (context, index) {
-              final doc = itens[index];
-              final data = doc.data() as Map<String, dynamic>;
-              final codigo = data['idCrachaTemporario'] ?? 'Item';
-              final tipo = data['tipoAgente'] ?? '';
+                final totalItens = snapshot.data!.docs;
+                final expedidos = totalItens.where((d) => d['status'] == 'entregue').toList();
+                final pendentes = totalItens.where((d) => d['status'] == 'aguardando_expedicao').toList();
 
-              // Dados visuais para conferência
-              final recarga = data['recarga'] as Map<String, dynamic>? ?? {};
-              final loteUsado = recarga['loteNumero'];
-              final foiTroca = recarga['tipo'] == 'TROCA_PO';
+                if (totalItens.isNotEmpty && pendentes.isEmpty) return _buildSucessoTotal();
 
-              return Card(
-                elevation: 4,
-                child: ListTile(
-                  leading: const Icon(Icons.inventory_2_outlined, color: Colors.black, size: 30),
-                  title: Text(codigo, style: const TextStyle(fontWeight: FontWeight.bold)),
-                  subtitle: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text('Tipo: $tipo'),
-                      if (foiTroca)
-                        Text('Pó Trocado: Lote $loteUsado', style: const TextStyle(color: Colors.green, fontSize: 12, fontWeight: FontWeight.bold))
-                      else
-                        const Text('Pó Reutilizado', style: TextStyle(color: Colors.orange, fontSize: 12)),
-                    ],
-                  ),
-                  trailing: ElevatedButton.icon(
-                    style: ElevatedButton.styleFrom(backgroundColor: Colors.black87),
-                    icon: const Icon(Icons.local_shipping, size: 16),
-                    label: const Text('EXPEDIR'),
-                    onPressed: () => _expedirItem(doc.id, codigo),
-                  ),
-                ),
-              );
-            },
-          );
-        },
+                return Column(
+                  children: [
+                    // Contador de Progresso
+                    Container(
+                      padding: const EdgeInsets.all(16),
+                      child: Text(
+                        'Carregados: ${expedidos.length} de ${totalItens.length}',
+                        style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                      ),
+                    ),
+
+                    Expanded(
+                      child: ListView.builder(
+                        itemCount: pendentes.length,
+                        itemBuilder: (context, index) {
+                          final dados = pendentes[index].data() as Map<String, dynamic>;
+                          return ListTile(
+                            leading: const Icon(Icons.inventory_2_outlined),
+                            title: Text('Crachá: ${dados['idCrachaTemporario']}'),
+                            subtitle: Text('${dados['tipoAgente']} ${dados['capacidade']}'),
+                            trailing: const Text('PENDENTE', style: TextStyle(color: Colors.orange, fontWeight: FontWeight.bold)),
+                          );
+                        },
+                      ),
+                    ),
+                  ],
+                );
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSucessoTotal() {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          const Icon(Icons.local_shipping, size: 100, color: Colors.green),
+          const SizedBox(height: 20),
+          const Text('VEÍCULO CARREGADO!', style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
+          const Text('Todos os itens foram expedidos com sucesso.'),
+          const SizedBox(height: 40),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context),
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.green, foregroundColor: Colors.white),
+            child: const Text('FINALIZAR E VOLTAR'),
+          ),
+        ],
       ),
     );
   }
