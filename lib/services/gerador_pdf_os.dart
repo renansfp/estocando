@@ -3,6 +3,7 @@
 
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
@@ -109,6 +110,9 @@ class GeradorPdfOS {
 
   // ─── Gera bytes do PDF ────────────────────────────────────────────────────
   Future<Uint8List> _buildPdfBytes(DadosRelatorioOS dados) async {
+    // Carrega a logo correta (cores para digital, mono para impressão P&B)
+    final logoData = await rootBundle.load('assets/images/logo_protecin_cores.png');
+    final logoBytes = logoData.buffer.asUint8List();
     final pdf  = pw.Document();
     final bold = await PdfGoogleFonts.robotoBold();
     final reg  = await PdfGoogleFonts.robotoRegular();
@@ -127,7 +131,7 @@ class GeradorPdfOS {
         build: (ctx) => pw.Column(
           crossAxisAlignment: pw.CrossAxisAlignment.stretch,
           children: [
-            _cabecalho(dados, bold, reg, p + 1, paginas.length),
+            _cabecalho(dados, bold, reg, p + 1, paginas.length, logoBytes),
             pw.SizedBox(height: 3),
             _infoCliente(dados, bold, reg),
             pw.SizedBox(height: 3),
@@ -147,7 +151,7 @@ class GeradorPdfOS {
   // =========================================================================
   // 1. CABEÇALHO
   // =========================================================================
-  pw.Widget _cabecalho(DadosRelatorioOS d, pw.Font bold, pw.Font reg, int pag, int tot) {
+  pw.Widget _cabecalho(DadosRelatorioOS d, pw.Font bold, pw.Font reg, int pag, int tot, Uint8List logoBytes) {
     return pw.Container(
       decoration: pw.BoxDecoration(border: pw.Border.all(width: 0.5)),
       child: pw.Row(children: [
@@ -156,21 +160,14 @@ class GeradorPdfOS {
           width: 68,
           padding: const pw.EdgeInsets.all(4),
           decoration: const pw.BoxDecoration(border: pw.Border(right: pw.BorderSide(width: 0.5))),
-          child: pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.center, children: [
-            pw.Container(
-              width: 28, height: 28,
-              decoration: pw.BoxDecoration(
-                border: pw.Border.all(width: 1.5, color: _vermelho),
-                borderRadius: const pw.BorderRadius.all(pw.Radius.circular(4)),
-              ),
-              child: pw.Center(child: pw.Text('P',
-                  style: pw.TextStyle(font: bold, fontSize: 14, color: _vermelho))),
+          child: pw.Center(
+            child: pw.Image(
+              pw.MemoryImage(logoBytes),
+              width: 52,
+              height: 56,
+              fit: pw.BoxFit.contain,
             ),
-            pw.SizedBox(height: 2),
-            pw.Text('PROTECIN',
-                style: pw.TextStyle(font: bold, fontSize: 5.5, color: _azul),
-                textAlign: pw.TextAlign.center),
-          ]),
+          ),
         ),
         // Título
         pw.Expanded(child: pw.Container(
@@ -218,7 +215,7 @@ class GeradorPdfOS {
     final os = d.os;
     final p  = d.parceiro;
     final dataTriagem = _resolverDataTriagem(d);
-    final dataFim     = os.dataSaida != null ? _fmt.format(os.dataSaida!) : '---';
+    final dataFim     = d.dataFinalizacao != null ? _fmt.format(d.dataFinalizacao!) : '---';
 
     return pw.Container(
       decoration: pw.BoxDecoration(border: pw.Border.all(width: 0.5)),
@@ -300,34 +297,34 @@ class GeradorPdfOS {
           : d.statusFinal == 'NC' ? _vermelho : _preto;
 
       rows.add(pw.TableRow(decoration: pw.BoxDecoration(color: bg), children: [
-        cel('${i + 1}'),                                          // seq
-        cel(eq.tipo),                                             // tipo
-        cel(eq.capacidade),                                       // cap
-        cel(d.nivelManutencao, f: bold),                         // nível
-        cel(eq.numeroCilindro),                                   // cilindro
-        cel(eq.anoFabricacao),                                    // ano fabr
-        cel(eq.numeroPintura ?? '---'),                           // nº pintura
-        cel(d.numeroCracha),                                      // crachá
-        cel(eq.capacidadeExtintora),                              // cap ext
-        cel(eq.fabricante, ctr: false),                           // fabricante
-        cel(eq.normaFabricacao),                                  // norma
-        cel(eq.projeto ?? '---'),                                 // cod projeto
-        cel(eq.pressaoTrabalho ?? '---'),                         // p. trabalho
-        cel(d.tara),                                              // tara
-        cel(d.pv),                                                // PV
-        cel(d.perdaMassaPct),                                     // perda%
-        cel(d.pc),                                                // PC
-        cel(d.volumeLts),                                         // volume
-        cel(d.capMaxCarga),                                       // cap max
-        cel(d.pressaoTeste),                                      // p. teste
-        cel(d.et),                                                // ET
-        cel(d.ep),                                                // EP
-        cel(d.motivoCondenacao ?? '', ctr: false),                // cond
-        cel('---'),                                               // ens. comp (futuro)
-        cel(d.pecasTrocadas),                                     // peças
-        cel(eq.lotePo ?? '---'),                                  // lote pó
-        cel(eq.anoUltimoTH ?? '---'),                             // último TH
-        cel(d.statusFinal, f: bold, cor: corStatus),              // status
+        cel('${i + 1}'),                                          // A seq
+        cel(eq.tipo),                                             // B tipo
+        cel(eq.capacidade),                                       // C cap
+        cel(d.nivelManutencao, f: bold),                         // D nível
+        cel(eq.numeroCilindro),                                   // E cilindro
+        cel(eq.anoFabricacao),                                    // F ano fabr
+        cel(eq.numeroPintura ?? '---'),                           // G nº pintura
+        cel(d.numeroCracha),                                      // H crachá
+        cel(eq.capacidadeExtintora),                              // I cap ext
+        cel(eq.fabricante, ctr: false),                           // J fabricante
+        cel(eq.normaFabricacao),                                  // K norma
+        cel(eq.projeto ?? '---'),                                 // L cod projeto
+        cel(eq.pressaoTrabalho ?? '---'),                         // M p. trabalho
+        cel(d.tara),                                              // N tara
+        cel(d.pv),                                                // O PV
+        cel(d.perdaMassaPct),                                     // P perda%
+        cel(d.pc),                                                // Q PC
+        cel(d.volumeLts),                                         // R volume
+        cel(d.capMaxCarga),                                       // S cap max
+        cel(d.pressaoTeste),                                      // T p. teste
+        cel(d.et),                                                // U ET
+        cel(d.ep),                                                // V EP
+        cel(d.motivoCondenacao ?? '', ctr: false),                // W cond
+        cel('---'),                                               // X ens. comp (futuro)
+        cel(d.pecasTrocadas),                                     // Y peças
+        cel(eq.lotePo ?? '---'),                                  // Z lote pó
+        cel(eq.anoUltimoTH ?? '---'),                             // AA último TH
+        cel(d.statusFinal, f: bold, cor: corStatus),              // AB status
       ]));
     }
 

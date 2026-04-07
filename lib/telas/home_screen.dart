@@ -27,7 +27,6 @@ import 'package:protecin_producao/telas/admin/tela_cadastro_parceiro.dart';
 
 // Imports Produção (Fluxo Completo)
 import 'package:protecin_producao/telas/producao/estacao/tela_estacao_descarga.dart';
-import 'package:protecin_producao/telas/producao/tela_lista_equipamentos.dart';
 import 'package:protecin_producao/telas/producao/tela_criar_os.dart';
 import 'package:protecin_producao/telas/producao/estacao/tela_estacao_limpeza.dart';
 import 'package:protecin_producao/telas/producao/estacao/tela_lista_lotes_limpeza.dart';
@@ -50,6 +49,8 @@ import 'package:protecin_producao/telas/producao/tela_consulta_equipamentos.dart
 import 'package:protecin_producao/telas/windows/tela_servidor_impressao.dart'; // Tela Manual
 // OBS: Verifique se o arquivo do Monitor está nessa pasta 'services' ou ajuste aqui:
 import 'package:protecin_producao/services/monitor_impressao_windows.dart';
+import 'package:protecin_producao/provider/usuario_provider.dart';
+import 'package:provider/provider.dart';
 // -------------------------------------------
 
 import 'dart:io';
@@ -69,11 +70,6 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   final _buscaController = TextEditingController();
-
-  String? _permissaoUsuario;
-  String? _empresaId;
-  bool _carregandoDadosIniciais = true;
-  Map<String, dynamic>? _dadosUsuario;
 
   // Variável para manter o Monitor vivo em memória
   MonitorImpressaoWindows? _monitorWindows;
@@ -114,7 +110,6 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void initState() {
     super.initState();
-    _carregarDadosUsuario();
     _iniciarOuvinteDashboard();
 
     // --- AUTO-START DO MONITOR (SÓ NO WINDOWS) ---
@@ -168,42 +163,6 @@ class _HomeScreenState extends State<HomeScreen> {
     _monitorWindows?.parar();
     _buscaController.dispose();
     super.dispose();
-  }
-
-  Future<void> _carregarDadosUsuario() async {
-    User? user = FirebaseAuth.instance.currentUser;
-    if (user == null) {
-      if (mounted) setState(() => _carregandoDadosIniciais = false);
-      return;
-    }
-    try {
-      DocumentSnapshot userData = await FirebaseFirestore.instance.collection(
-          'usuarios').doc(user.uid).get();
-      if (mounted && userData.exists) {
-        final data = userData.data() as Map<String, dynamic>;
-        setState(() {
-          _dadosUsuario = data;
-          _permissaoUsuario = data['permissao'];
-          _empresaId = data['empresaId'];
-          if (_permissaoUsuario == null ||
-              !['admin', 'almoxarife', 'producao'].contains(
-                  _permissaoUsuario)) {
-            _permissaoUsuario = 'producao';
-          }
-          _carregandoDadosIniciais = false;
-        });
-      } else {
-        if (mounted) setState(() {
-          _permissaoUsuario = 'producao';
-          _carregandoDadosIniciais = false;
-        });
-      }
-    } catch (e) {
-      if (mounted) setState(() {
-        _permissaoUsuario = 'producao';
-        _carregandoDadosIniciais = false;
-      });
-    }
   }
 
   void _iniciarOuvinteDashboard() {
@@ -352,15 +311,17 @@ class _HomeScreenState extends State<HomeScreen> {
       Navigator.push(context,
           MaterialPageRoute(builder: (c) => const TelaCadastroParceiro()));
 
+  // DEPOIS
   Future<void> _exportarProdutosParaExcel() async {
     try {
-      if (_empresaId == null) return;
+      final usuario = context.read<UsuarioProvider>().usuario;
+      if (usuario == null) return;
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
           content: Text('Gerando relatório...'), backgroundColor: Colors.blue));
       final querySnapshot = await FirebaseFirestore.instance
           .collection(
           'produtos')
-          .where('empresaId', isEqualTo: _empresaId)
+          .where('empresaId', isEqualTo: usuario?.empresaId ?? '')
           .orderBy('nome')
           .get();
       var excel = Excel.createExcel();
@@ -422,9 +383,11 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final bool isAdmin = _permissaoUsuario == 'admin';
-    final bool isAlmoxarife = _permissaoUsuario == 'almoxarife';
-    final bool isProducao = _permissaoUsuario == 'producao';
+    final usuario = context.watch<UsuarioProvider>().usuario;
+    final String permissao = usuario?.permissao ?? 'producao';
+    final bool isAdmin = permissao == 'admin';
+    final bool isAlmoxarife = permissao == 'almoxarife';
+    final bool isProducao = permissao == 'producao';
 
     return Scaffold(
       appBar: AppBar(
@@ -448,12 +411,12 @@ class _HomeScreenState extends State<HomeScreen> {
         ],
         // ---------------------------------------------
       ),
-      drawer: _carregandoDadosIniciais
+      drawer: context.watch<UsuarioProvider>().isLoading
           ? const Drawer(child: Center(child: CircularProgressIndicator()))
           : _buildDrawer(),
       backgroundColor: Colors.grey[100],
 
-      body: _carregandoDadosIniciais
+      body: context.watch<UsuarioProvider>().isLoading
           ? const Center(child: CircularProgressIndicator())
           : SingleChildScrollView(
         padding: const EdgeInsets.fromLTRB(16, 16, 16, 80),
@@ -645,7 +608,7 @@ class _HomeScreenState extends State<HomeScreen> {
               StreamBuilder<QuerySnapshot>(
                 stream: FirebaseFirestore.instance
                     .collection('requisicoes')
-                    .where('empresaId', isEqualTo: _empresaId)
+                    .where('empresaId', isEqualTo: usuario?.empresaId ?? '')
                     .where('status', isEqualTo: 'PENDENTE')
                     .limit(1)
                     .snapshots(),
@@ -1093,7 +1056,8 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Widget _buildDrawer() {
-    final String? permissao = _permissaoUsuario;
+    final usuario = context.read<UsuarioProvider>().usuario;
+    final String permissao = usuario?.permissao ?? 'producao';
     final bool isAdmin = permissao == 'admin';
     final bool isAlmoxarife = permissao == 'almoxarife';
     final String? currentUserEmail = FirebaseAuth.instance.currentUser?.email;

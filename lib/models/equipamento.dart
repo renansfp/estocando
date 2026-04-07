@@ -1,8 +1,6 @@
 // Salve como: lib/models/equipamento.dart
 // (VERSÃO v6.0 - Com Origem do Selo e Última Troca de Pó)
 
-import 'package:cloud_firestore/cloud_firestore.dart';
-
 enum StatusEquipamento {
   ativo,
   emManutencao,
@@ -45,6 +43,7 @@ class Equipamento {
 
   // Controle de Condenação
   final String? motivoCondenacao;
+  final String? osIdAtual;
 
   final StatusEquipamento status;
 
@@ -74,6 +73,7 @@ class Equipamento {
     this.origemSelo,
 
     this.motivoCondenacao,
+    this.osIdAtual,
     this.status = StatusEquipamento.ativo,
   });
 
@@ -102,6 +102,7 @@ class Equipamento {
     'origemSelo': origemSelo,
 
     'motivoCondenacao': motivoCondenacao,
+    'osIdAtual': osIdAtual,
     'status': status.name,
   };
 
@@ -133,6 +134,7 @@ class Equipamento {
       origemSelo: json['origemSelo'],
 
       motivoCondenacao: json['motivoCondenacao'],
+      osIdAtual: json['osIdAtual'],
       status: StatusEquipamento.values.firstWhere(
               (e) => e.name == (json['status'] ?? 'ativo'),
           orElse: () => StatusEquipamento.ativo),

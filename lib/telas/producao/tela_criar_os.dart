@@ -1,7 +1,6 @@
 // Salve como: lib/telas/producao/tela_criar_os.dart
 // (VERSÃO CORRIGIDA - Salva itens na raiz 'itens_os')
 
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:protecin_producao/models/item_os.dart';
 import 'package:protecin_producao/models/ordem_servico.dart';
@@ -10,6 +9,8 @@ import 'package:protecin_producao/provider/usuario_provider.dart';
 import 'package:protecin_producao/widgets/autocomplete_parceiro.dart';
 import 'package:provider/provider.dart';
 import 'package:protecin_producao/widgets/dialog_casamento.dart';
+import 'package:protecin_producao/provider/ordem_servico_provider.dart';
+import 'package:protecin_producao/provider/equipamento_provider.dart';
 
 class TelaCriarOS extends StatefulWidget {
   const TelaCriarOS({super.key});
@@ -75,7 +76,6 @@ class _TelaCriarOSState extends State<TelaCriarOS> {
 
   // --- FUNÇÃO AUXILIAR PARA CHECAR O BANCO ---
   Future<bool> _verificarDisponibilidadeNoBanco(String equipamentoId) async {
-    // Mostra um loading rápido para não travar a UI
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -83,32 +83,24 @@ class _TelaCriarOSState extends State<TelaCriarOS> {
     );
 
     try {
-      final doc = await FirebaseFirestore.instance.collection('equipamentos').doc(equipamentoId).get();
+      final livre = await context
+          .read<EquipamentoProvider>()
+          .verificarDisponibilidade(equipamentoId);
 
-      // Fecha o loading
+      if (!mounted) return false;
       Navigator.of(context).pop();
 
-      if (!doc.exists) return true; // Se não existe, teoricamente está livre (ou é erro de cadastro)
-
-      final data = doc.data() as Map<String, dynamic>;
-
-      // Verifica o status ou se tem uma OS vinculada
-      String status = data['status'] ?? 'ativo';
-      String? osAtual = data['osIdAtual'];
-
-      // REGRA: Se status for diferente de 'ativo' OU tiver um ID de OS vinculado, está ocupado!
-      if (status == 'em_manutencao' || (osAtual != null && osAtual.isNotEmpty)) {
+      if (!livre) {
         _mostrarAlertaErro(
-            'Equipamento Ocupado!',
-            'Este cilindro já está na produção.\nStatus: $status\nOS Atual: ${osAtual ?? "Erro"}'
+          'Equipamento Ocupado!',
+          'Este cilindro já está na produção.',
         );
-        return false;
       }
-
-      return true; // Está livre
+      return livre;
     } catch (e) {
-      Navigator.of(context).pop(); // Fecha loading no erro
-      return false; // Na dúvida, bloqueia
+      if (!mounted) return false;
+      Navigator.of(context).pop();
+      return false;
     }
   }
 
@@ -125,12 +117,12 @@ class _TelaCriarOSState extends State<TelaCriarOS> {
     );
   }
   Future<void> _finalizarOS() async {
-    // Validação Inicial
     if (_clienteSelecionado == null || _itensDaOS.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-            content: Text('Preencha o cliente e adicione pelo menos 1 item.'),
-            backgroundColor: Colors.red),
+          content: Text('Preencha o cliente e adicione pelo menos 1 item.'),
+          backgroundColor: Colors.red,
+        ),
       );
       return;
     }
@@ -140,97 +132,46 @@ class _TelaCriarOSState extends State<TelaCriarOS> {
 
     setState(() => _isSaving = true);
 
-    try {
-      final firestore = FirebaseFirestore.instance;
+    final novaOS = OrdemServico(
+      id: '',
+      numeroOS: '',
+      empresaId: usuario.empresaId,
+      clienteId: _clienteSelecionado!.id,
+      clienteNome: _clienteSelecionado!.nome,
+      statusLote: StatusLoteOS.emProducao,
+      dataEntrada: DateTime.now(),
+      usuarioNomeEntrada: usuario.nome,
+    );
 
-      // 1. Criar o "Pacote" (Batch)
-      final batch = firestore.batch();
+    final numeroOS = await context.read<OrdemServicoProvider>().criarOS(
+      os: novaOS,
+      itens: _itensDaOS,
+      cliente: _clienteSelecionado!,
+      observacoes: _obsController.text.trim(),
+    );
 
-      // 2. Ler o contador (Fora da transação para evitar o crash)
-      // Nota: Em sistemas gigantes isso poderia ter risco, mas para seu uso é seguro.
-      final configRef = firestore.collection('config').doc('contadores');
-      final configDoc = await configRef.get();
+    if (!mounted) return;
+    setState(() => _isSaving = false);
 
-      int proximoNumero = 1;
-      if (configDoc.exists && configDoc.data() != null && configDoc.data()!.containsKey('ultima_os')) {
-        // Forçamos ser um int para garantir
-        final val = configDoc.get('ultima_os');
-        proximoNumero = (val is int ? val : int.tryParse(val.toString()) ?? 0) + 1;
-      }
-      final String idFormatado = proximoNumero.toString().padLeft(5, '0');
-
-      // 3. Preparar a OS
-      final osRef = firestore.collection('ordens_servico').doc(idFormatado);
-
-      final novaOS = OrdemServico(
-        id: idFormatado,
-        numeroOS: idFormatado,
-        empresaId: usuario.empresaId,
-        clienteId: _clienteSelecionado!.id,
-        clienteNome: _clienteSelecionado!.nome,
-        statusLote: StatusLoteOS.emProducao,
-        dataEntrada: DateTime.now(),
-        usuarioNomeEntrada: usuario.nome,
+    if (numeroOS != null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('OS Gerada com Sucesso!'),
+          backgroundColor: Colors.green,
+        ),
       );
-
-      final osMap = novaOS.toJson();
-      osMap['statusLote'] = 'na_descarga';
-      osMap['etapaAtual'] = 'descarga';
-      osMap['quantidadeTotal'] = _itensDaOS.length;
-      osMap['numeroSequencial'] = proximoNumero;
-      osMap['observacoes'] = _obsController.text.trim();
-
-      // Adiciona a OS no pacote
-      batch.set(osRef, osMap);
-
-      // 4. Preparar os Itens
-      for (final item in _itensDaOS) {
-        final itemRef = firestore.collection('itens_os').doc();
-
-        final itemJson = item.toJson();
-        itemJson['osId'] = idFormatado;
-        itemJson['numeroOS'] = idFormatado;
-        itemJson['clienteNome'] = _clienteSelecionado!.nome;
-        itemJson['status'] = 'aguardando_descarga';
-        itemJson['statusAtual'] = 'emProducao';
-        itemJson['dataEntrada'] = FieldValue.serverTimestamp();
-
-        // Adiciona o item no pacote
-        batch.set(itemRef, itemJson);
-
-        // Atualizar equipamento (Usando merge para evitar crash se não existir)
-        final equipRef = firestore.collection('equipamentos').doc(item.equipamentoId);
-        batch.set(equipRef, {
-          'status': 'em_manutencao',
-          'osIdAtual': idFormatado,
-          'itemIdAtual': itemRef.id,
-        }, SetOptions(merge: true));
-      }
-
-      // 5. Atualizar o contador no pacote
-      batch.set(configRef, {'ultima_os': proximoNumero}, SetOptions(merge: true));
-
-      // --- O MOMENTO MÁGICO ---
-      // Envia tudo de uma vez para o Firebase
-      await batch.commit();
-
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('OS Gerada com Sucesso!'), backgroundColor: Colors.green),
-        );
-        Navigator.of(context).pop();
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Erro ao salvar: $e'), backgroundColor: Colors.red),
-        );
-      }
-      print("ERRO BATCH: $e");
-    } finally {
-      if (mounted) setState(() => _isSaving = false);
+      Navigator.of(context).pop();
+    } else {
+      final erro = context.read<OrdemServicoProvider>().erro;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(erro ?? 'Erro ao salvar OS.'),
+          backgroundColor: Colors.red,
+        ),
+      );
     }
   }
+
   @override
   Widget build(BuildContext context) {
     final usuario = Provider.of<UsuarioProvider>(context, listen: false).usuario;

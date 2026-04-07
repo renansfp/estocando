@@ -1,7 +1,6 @@
 // lib/telas/producao/tela_cadastro_equipamento.dart
 // (VERSÃO v13.1 - CORRIGIDA: Lógica de Alerta Reativa)
 
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:mask_text_input_formatter/mask_text_input_formatter.dart';
 import 'package:protecin_producao/models/equipamento.dart';
@@ -10,6 +9,7 @@ import 'package:protecin_producao/provider/usuario_provider.dart';
 import 'package:protecin_producao/widgets/autocomplete_parceiro.dart';
 import 'package:protecin_producao/models/dados_tecnicos.dart';
 import 'package:provider/provider.dart';
+import 'package:protecin_producao/provider/equipamento_provider.dart';
 
 class TelaCadastroEquipamento extends StatefulWidget {
   final Parceiro? clientePreSelecionado;
@@ -401,12 +401,12 @@ class _TelaCadastroEquipamentoState extends State<TelaCadastroEquipamento> {
         isAbcPremium: false,
       );
 
-      final col = FirebaseFirestore.instance.collection('equipamentos');
+      final provider = context.read<EquipamentoProvider>();
       if (widget.equipamentoParaEditar != null) {
-        await col.doc(eq.id).update(eq.toJson());
+        await provider.atualizar(eq);
       } else {
-        final docRef = await col.add(eq.toJson());
-        final novoComId = Equipamento.fromJson(eq.toJson(), docRef.id);
+        final novoId = await provider.criar(eq);
+        final novoComId = Equipamento.fromJson(eq.toJson(), novoId);
         if (mounted) Navigator.of(context).pop(novoComId);
         return;
       }

@@ -7,6 +7,10 @@ import 'firebase_options.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 import 'package:protecin_producao/provider/usuario_provider.dart';
+import 'package:protecin_producao/provider/equipamento_provider.dart';
+import 'package:protecin_producao/repositories/firestore_equipamento_repository.dart';
+import 'package:protecin_producao/provider/ordem_servico_provider.dart';
+import 'package:protecin_producao/repositories/firestore_ordem_servico_repository.dart';
 // import 'package:protecin_producao/telas/windows/tela_servidor_impressao.dart'; // Pode comentar ou manter se tiver botão para ir pra lá
 
 Future<void> main() async {
@@ -20,6 +24,20 @@ Future<void> main() async {
         ChangeNotifierProvider(
           create: (context) => UsuarioProvider(),
         ),
+
+        // NOVO — adicione estas 4 linhas:
+        ChangeNotifierProvider(
+          create: (context) => EquipamentoProvider(
+            FirestoreEquipamentoRepository(),
+          ),
+        ),
+
+        ChangeNotifierProvider(
+          create: (context) => OrdemServicoProvider(
+            FirestoreOrdemServicoRepository(),
+          ),
+        ),
+
       ],
       child: const MyApp(),
     ),

@@ -72,10 +72,14 @@ class DadosRelatorioOS {
   final Parceiro parceiro;
   final List<DadosItemRelatorio> itens;
 
+  // dataSaida da OS ou, se null, a maior dataExpedicao entre os itens
+  final DateTime? dataFinalizacao;
+
   DadosRelatorioOS({
     required this.os,
     required this.parceiro,
     required this.itens,
+    this.dataFinalizacao,
   });
 }
 
@@ -196,7 +200,26 @@ class RelatorioOsService {
     // Ordena por ativo fixo
     itens.sort((a, b) => (a.equipamento.ativoFixo).compareTo(b.equipamento.ativoFixo));
 
-    return DadosRelatorioOS(os: os, parceiro: parceiro, itens: itens);
+    // Deriva data de finalização: usa dataSaida da OS ou a maior dataExpedicao dos itens
+    DateTime? dataFinalizacao = os.dataSaida;
+    if (dataFinalizacao == null) {
+      for (final doc in snapItens.docs) {
+        final ts = doc.data()['dataExpedicao'];
+        if (ts != null) {
+          final dt = (ts as dynamic).toDate() as DateTime;
+          if (dataFinalizacao == null || dt.isAfter(dataFinalizacao)) {
+            dataFinalizacao = dt;
+          }
+        }
+      }
+    }
+
+    return DadosRelatorioOS(
+      os: os,
+      parceiro: parceiro,
+      itens: itens,
+      dataFinalizacao: dataFinalizacao,
+    );
   }
 
   // ─── AUXILIARES ──────────────────────────────────────────────────────────

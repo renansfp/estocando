@@ -45,6 +45,9 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+  assets:
+    - assets/images/logo_protecin_cores.png
+    - assets/images/logo_protecin_mono.png
 
 # Configuração dos ícones (Isso aqui fica fora do bloco flutter, bem no final)
 flutter_launcher_icons:
