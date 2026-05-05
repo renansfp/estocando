@@ -243,6 +243,8 @@ class _EtiquetaArgoxVisualState extends State<EtiquetaArgoxVisual> {
                           color: Colors.white, fontWeight: FontWeight.bold)),
                   onPressed: () async {
                     setState(() => _gerandoImagem = true);
+                    // Captura o provider antes de qualquer await — regra do BuildContext async
+                    final provider = context.read<ItemOsProvider>();
                     try {
                       // 1. SE ESTIVER NO WINDOWS: Imprime direto e local (Sem Nuvem)
                       if (Theme.of(context).platform == TargetPlatform.windows) {
@@ -270,7 +272,7 @@ class _EtiquetaArgoxVisualState extends State<EtiquetaArgoxVisual> {
                       else {
                         String? impressoraEscolhida = await _selecionarImpressoraDestino();
                         if (impressoraEscolhida != null) {
-                          await context.read<ItemOsProvider>().criarPrintJob(
+                          await provider.criarPrintJob(
                             itensIds: [widget.docId],
                             osId: widget.lote,
                             imprimirGarantia: true,

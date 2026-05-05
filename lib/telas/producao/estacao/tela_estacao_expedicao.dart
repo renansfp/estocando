@@ -27,15 +27,18 @@ class _TelaEstacaoExpedicaoState extends State<TelaEstacaoExpedicao> {
 
     String idCracha = _limparCodigo(codigo);
 
+    // Captura o provider antes de qualquer await — regra do BuildContext async
+    final provider = context.read<ItemOsProvider>();
+
     try {
-      final item = await context.read<ItemOsProvider>().buscarItemPorCracha(
+      final item = await provider.buscarItemPorCracha(
         widget.osId,
         idCracha,
         'aguardando_expedicao',
       );
 
       if (item != null) {
-        await context.read<ItemOsProvider>().expedirItem(
+        await provider.expedirItem(
           itemId: item['id'],
           osId: widget.osId,
           idCracha: idCracha,

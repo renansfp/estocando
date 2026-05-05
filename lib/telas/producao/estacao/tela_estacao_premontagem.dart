@@ -32,9 +32,12 @@ class _TelaEstacaoPremontagemState extends State<TelaEstacaoPremontagem> {
       _statusEnvio = 'Liberando lote...';
     });
 
+    // Captura o provider antes de qualquer await — regra do BuildContext async
+    final provider = context.read<ItemOsProvider>();
+
     try {
       // Avança todos os itens via repository
-      await context.read<ItemOsProvider>().liberarLotePremontagem(
+      await provider.liberarLotePremontagem(
         osId: widget.osId,
         itens: itens,
         operador: operador,
@@ -43,7 +46,7 @@ class _TelaEstacaoPremontagemState extends State<TelaEstacaoPremontagem> {
       setState(() => _statusEnvio = 'Enviando ordem de impressão...');
 
       // Cria o job de impressão para o servidor Windows
-      await context.read<ItemOsProvider>().criarPrintJob(
+      await provider.criarPrintJob(
         itensIds: itens.map((item) => item['id'] as String).toList(),
         osId: widget.osId,
         imprimirGarantia: imprimirGarantia,
@@ -230,9 +233,10 @@ class _TelaEstacaoPremontagemState extends State<TelaEstacaoPremontagem> {
         label: const Text('LIBERAR LOTE E IMPRIMIR',
             style: TextStyle(color: Colors.white)),
         onPressed: () async {
+          // Captura o provider antes do await — regra do BuildContext async
+          final provider = context.read<ItemOsProvider>();
           // Busca snapshot único para o botão de liberação
-          final todos = await context
-              .read<ItemOsProvider>()
+          final todos = await provider
               .streamItensPorOs(widget.osId)
               .first;
 

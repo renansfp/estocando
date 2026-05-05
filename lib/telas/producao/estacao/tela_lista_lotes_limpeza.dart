@@ -28,6 +28,9 @@ class _TelaListaLotesLimpezaState extends State<TelaListaLotesLimpeza> {
   }
 
   Future<void> _reverterParaDescarga(String osId, BuildContext context) async {
+    // Captura o repository antes do await — regra do BuildContext async
+    final repository = context.read<ItemOsRepository>();
+
     final confirmou = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -51,8 +54,7 @@ class _TelaListaLotesLimpezaState extends State<TelaListaLotesLimpeza> {
     if (confirmou != true) return;
 
     try {
-      // ← usa o repository em vez do Firestore direto
-      await context.read<ItemOsRepository>().reverterLote(
+      await repository.reverterLote(
         osId: osId,
         statusAtual: 'aguardando_limpeza',
         statusAnterior: 'aguardando_descarga',

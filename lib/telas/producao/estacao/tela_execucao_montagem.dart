@@ -69,12 +69,15 @@ class _TelaExecucaoMontagemState extends State<TelaExecucaoMontagem> {
 
     setState(() => _carregando = true);
 
+    // Captura o provider antes de qualquer await — regra do BuildContext async
+    final provider = context.read<ItemOsProvider>();
+
     try {
       // Aguarda a URL — se o upload já terminou, retorna instantaneamente
       final String urlFoto = await _uploadFuture!;
 
       // Usa confirmarEtapa — sem Firestore direto
-      await context.read<ItemOsProvider>().confirmarEtapa(
+      await provider.confirmarEtapa(
         itemId: widget.item['id'],
         dadosItem: {
           'montagem_final': {
@@ -96,7 +99,7 @@ class _TelaExecucaoMontagemState extends State<TelaExecucaoMontagem> {
       if (_bytesImagem != null) {
         try {
           final urlFoto = await _iniciarUpload(_bytesImagem!);
-          await context.read<ItemOsProvider>().confirmarEtapa(
+          await provider.confirmarEtapa(
             itemId: widget.item['id'],
             dadosItem: {
               'montagem_final': {

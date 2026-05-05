@@ -85,9 +85,13 @@ class _TelaEstacaoManutencaoValvulaState
     String idLimpo = _limparCodigo(codigo);
     _controllerEtiqueta.text = idLimpo;
 
+    // Captura os providers antes de qualquer await — regra do BuildContext async
+    final itemOsProvider = context.read<ItemOsProvider>();
+    final equipamentoProvider = context.read<EquipamentoProvider>();
+
     try {
       // Busca o item via provider
-      final item = await context.read<ItemOsProvider>().buscarItemPorCracha(
+      final item = await itemOsProvider.buscarItemPorCracha(
         widget.osId,
         idLimpo,
         'aguardando_manutencao_valvula',
@@ -95,8 +99,7 @@ class _TelaEstacaoManutencaoValvulaState
 
       if (item != null) {
         // Busca o equipamento via EquipamentoProvider
-        final equip = await context
-            .read<EquipamentoProvider>()
+        final equip = await equipamentoProvider
             .buscarPorId(item['equipamentoId']);
 
         if (equip != null) {

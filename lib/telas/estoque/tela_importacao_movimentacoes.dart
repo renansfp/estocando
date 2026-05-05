@@ -66,6 +66,7 @@ class _TelaImportacaoMovimentacoesState
       allowedExtensions: ['csv'],
       withData: true,
     );
+    if (!mounted) return;
     if (result == null || result.files.single.bytes == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Nenhum arquivo selecionado.')),

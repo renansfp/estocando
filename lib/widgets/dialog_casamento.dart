@@ -192,6 +192,7 @@ class _DialogCasamentoState extends State<DialogCasamento> {
           ),
         ),
       );
+      if (!mounted) return;
       if (novo != null && novo is Equipamento) {
         setState(() => _equipamentoEncontrado = novo);
         FocusScope.of(context).requestFocus(_crachaFocus);
