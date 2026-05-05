@@ -1,4 +1,3 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
@@ -134,7 +133,7 @@ class _TelaControleLotesPoState extends State<TelaControleLotesPo> {
           final vB = b['validade'];
           if (vA == null) return 1;
           if (vB == null) return -1;
-          return (vA as Timestamp).compareTo(vB as Timestamp);
+          return (vA as DateTime).compareTo(vB as DateTime);
         });
 
         return ListView.separated(
@@ -151,7 +150,7 @@ class _TelaControleLotesPoState extends State<TelaControleLotesPo> {
             String validadeStr = '???';
             bool vencido = false;
             if (lote['validade'] != null) {
-              final valDate = (lote['validade'] as Timestamp).toDate();
+              final valDate = lote['validade'] as DateTime;
               validadeStr = DateFormat('dd/MM/yyyy').format(valDate);
               if (valDate.isBefore(DateTime.now())) vencido = true;
             }
@@ -294,8 +293,8 @@ class _TelaControleLotesPoState extends State<TelaControleLotesPo> {
                     }
                     listaFinal.addAll(agrupadosPorOS.values);
                     listaFinal.sort((a, b) {
-                      Timestamp tA = a['data'];
-                      Timestamp tB = b['data'];
+                      DateTime tA = a['data'] as DateTime;
+                      DateTime tB = b['data'] as DateTime;
                       return tB.compareTo(tA);
                     });
 
@@ -307,7 +306,7 @@ class _TelaControleLotesPoState extends State<TelaControleLotesPo> {
                       itemBuilder: (context, index) {
                         final m = listaFinal[index];
                         final data = DateFormat('dd/MM/yyyy HH:mm')
-                            .format((m['data'] as Timestamp).toDate());
+                            .format(m['data'] as DateTime);
                         final isSaida = m['tipo'] == 'saida';
                         final colorMov = isSaida ? Colors.red : Colors.green;
                         final iconMov = isSaida

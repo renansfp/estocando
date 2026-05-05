@@ -7,11 +7,31 @@ import 'package:protecin_producao/repositories/movimentacao_repository.dart';
 class FirestoreMovimentacaoRepository implements MovimentacaoRepository {
   final FirebaseFirestore _db = FirebaseFirestore.instance;
 
+  // Converte todos os Timestamp do Firestore para DateTime antes de entregar
+  // para as telas. Assim nenhuma tela precisa importar cloud_firestore.
+  Map<String, dynamic> _convertTimestamps(Map<String, dynamic> data) {
+    return data.map((key, value) {
+      if (value is Timestamp) return MapEntry(key, value.toDate());
+      if (value is Map<String, dynamic>) {
+        return MapEntry(key, _convertTimestamps(value));
+      }
+      if (value is List) {
+        return MapEntry(key, value.map((e) {
+          if (e is Timestamp) return e.toDate();
+          if (e is Map<String, dynamic>) return _convertTimestamps(e);
+          return e;
+        }).toList());
+      }
+      return MapEntry(key, value);
+    });
+  }
+
   Map<String, dynamic> _toMap(DocumentSnapshot doc) {
-    return <String, dynamic>{
+    final raw = <String, dynamic>{
       'id': doc.id,
       ...(doc.data() as Map<String, dynamic>? ?? {}),
     };
+    return _convertTimestamps(raw);
   }
 
   @override

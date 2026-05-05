@@ -1,4 +1,3 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
@@ -118,8 +117,7 @@ class _TelaExtratoMovimentacoesState extends State<TelaExtratoMovimentacoes> {
                     final Color corIcone =
                     isEntrada ? Colors.green : Colors.red;
 
-                    final dataDoBanco =
-                    (mov['data'] as Timestamp).toDate();
+                    final dataDoBanco = mov['data'] as DateTime;
                     final String dataFormatada =
                     DateFormat('dd/MM/yyyy HH:mm')
                         .format(dataDoBanco);

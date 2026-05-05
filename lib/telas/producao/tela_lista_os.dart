@@ -1,7 +1,6 @@
 // lib/telas/producao/tela_lista_os.dart
 // Migrada para Repository Pattern — sem acesso direto ao Firestore.
 
-import 'package:cloud_firestore/cloud_firestore.dart'; // apenas Timestamp (nos Maps retornados)
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
@@ -132,8 +131,7 @@ class _TelaListaOSState extends State<TelaListaOS> {
                     String dataFormatada = '---';
                     if (os['dataEntrada'] != null) {
                       try {
-                        final dt =
-                        (os['dataEntrada'] as Timestamp).toDate();
+                        final dt = os['dataEntrada'] as DateTime;
                         dataFormatada =
                             DateFormat('dd/MM/yyyy').format(dt);
                       } catch (_) {}

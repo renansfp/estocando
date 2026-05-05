@@ -1,4 +1,3 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
@@ -106,8 +105,8 @@ class _TelaGerenciarMovimentacoesState
 
               DateTime dataMov;
               final dataValue = mov['data'];
-              if (dataValue is Timestamp) {
-                dataMov = dataValue.toDate();
+              if (dataValue is DateTime) {
+                dataMov = dataValue;
               } else if (dataValue is String) {
                 dataMov = DateTime.tryParse(dataValue) ?? DateTime.now();
               } else {

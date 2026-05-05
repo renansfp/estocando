@@ -10,7 +10,6 @@ import 'package:excel/excel.dart' hide Border;
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:provider/provider.dart';
-import 'package:cloud_firestore/cloud_firestore.dart'; // apenas Timestamp nos calculos
 import 'package:protecin_producao/provider/movimentacao_provider.dart';
 import 'package:protecin_producao/provider/parceiro_provider.dart';
 import 'package:protecin_producao/provider/produto_provider.dart';
@@ -112,7 +111,7 @@ class _TelaRelatoriosState extends State<TelaRelatorios> {
     DateTime(dataAlvo.year, dataAlvo.month, dataAlvo.day, 23, 59, 59);
     final movimentacoesFuturas = movimentacoes.where((mov) {
       try {
-        final dataMov = (mov['data'] as Timestamp).toDate();
+        final dataMov = mov['data'] as DateTime;
         return dataMov.isAfter(dataAlvoFimDoDia);
       } catch (e) {
         return false;
@@ -199,7 +198,7 @@ class _TelaRelatoriosState extends State<TelaRelatorios> {
     DateTime(dataFim.year, dataFim.month, dataFim.day, 23, 59, 59);
     final saidas = movimentacoes.where((mov) {
       try {
-        final dataMov = (mov['data'] as Timestamp).toDate();
+        final dataMov = mov['data'] as DateTime;
         final dentroDoPeriodo =
             !dataMov.isBefore(dataInicio) && dataMov.isBefore(fimDoDia);
         final cc = mov['centroDeCusto'];
@@ -233,7 +232,7 @@ class _TelaRelatoriosState extends State<TelaRelatorios> {
     DateTime(_dataFim!.year, _dataFim!.month, _dataFim!.day, 23, 59, 59);
     final saidas = movimentacoes.where((mov) {
       try {
-        final dataMov = (mov['data'] as Timestamp).toDate();
+        final dataMov = mov['data'] as DateTime;
         return mov['tipo'] == 'saida' &&
             !dataMov.isBefore(_dataInicio!) &&
             dataMov.isBefore(fim);
@@ -314,7 +313,7 @@ class _TelaRelatoriosState extends State<TelaRelatorios> {
     DateTime(dataFim.year, dataFim.month, dataFim.day, 23, 59, 59);
     final saidasItau = movimentacoes.where((mov) {
       try {
-        final dataMov = (mov['data'] as Timestamp).toDate();
+        final dataMov = mov['data'] as DateTime;
         return mov['tipo'] == 'saida' &&
             mov['subTipo'] == 'Itau' &&
             !dataMov.isBefore(dataInicio) &&

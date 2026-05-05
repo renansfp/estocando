@@ -6,6 +6,33 @@ import 'package:protecin_producao/repositories/item_os_repository.dart';
 class FirestoreItemOsRepository implements ItemOsRepository {
   final FirebaseFirestore _db = FirebaseFirestore.instance;
 
+  // Converte todos os Timestamp do Firestore para DateTime antes de entregar
+  // para as telas. Assim nenhuma tela precisa importar cloud_firestore.
+  Map<String, dynamic> _convertTimestamps(Map<String, dynamic> data) {
+    return data.map((key, value) {
+      if (value is Timestamp) return MapEntry(key, value.toDate());
+      if (value is Map<String, dynamic>) {
+        return MapEntry(key, _convertTimestamps(value));
+      }
+      if (value is List) {
+        return MapEntry(key, value.map((e) {
+          if (e is Timestamp) return e.toDate();
+          if (e is Map<String, dynamic>) return _convertTimestamps(e);
+          return e;
+        }).toList());
+      }
+      return MapEntry(key, value);
+    });
+  }
+
+  Map<String, dynamic> _toMap(DocumentSnapshot doc) {
+    final raw = <String, dynamic>{
+      'id': doc.id,
+      ...(doc.data() as Map<String, dynamic>? ?? {}),
+    };
+    return _convertTimestamps(raw);
+  }
+
   @override
   Stream<Map<String, int>> streamContadoresDashboard(String empresaId) {
     return _db
@@ -755,10 +782,7 @@ class FirestoreItemOsRepository implements ItemOsRepository {
         .collection('itens_os')
         .where('osId', isEqualTo: osId)
         .get();
-    return snap.docs.map((doc) => <String, dynamic>{
-      'id': doc.id,
-      ...doc.data(),
-    }).toList();
+    return snap.docs.map(_toMap).toList();
   }
 
 

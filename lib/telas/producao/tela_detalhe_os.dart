@@ -1,7 +1,6 @@
 // lib/telas/producao/tela_detalhe_os.dart
 // Migrada para Repository Pattern — sem acesso direto ao Firestore.
 
-import 'package:cloud_firestore/cloud_firestore.dart'; // apenas Timestamp nos Maps
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
@@ -109,7 +108,7 @@ class TelaDetalhesOS extends StatelessWidget {
       String docId) {
     DateTime dataBase = DateTime.now();
     if (item['data_finalizacao'] != null) {
-      dataBase = (item['data_finalizacao'] as Timestamp).toDate();
+      dataBase = item['data_finalizacao'] as DateTime;
     }
 
     DateTime dataN2 =
@@ -239,7 +238,7 @@ class TelaDetalhesOS extends StatelessWidget {
           if (campoData != null) {
             try {
               dataEntrada = DateFormat('dd/MM/yyyy HH:mm')
-                  .format((campoData as Timestamp).toDate());
+                  .format(campoData as DateTime);
             } catch (_) {}
           }
           final statusGeral =
