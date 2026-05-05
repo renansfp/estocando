@@ -1,7 +1,10 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
+// lib/telas/producao/estacao/tela_estacao_th.dart
+
 import 'package:flutter/material.dart';
-import 'package:protecin_producao/widgets/campo_com_scanner.dart';
+import 'package:provider/provider.dart';
+import 'package:protecin_producao/provider/item_os_provider.dart';
 import 'package:protecin_producao/widgets/botao_condenar.dart';
+import 'package:protecin_producao/widgets/campo_com_scanner.dart';
 import 'package:protecin_producao/telas/producao/estacao/tela_ensaio_th.dart';
 import 'package:protecin_producao/telas/estoque/tela_criar_requisicao.dart';
 import 'package:protecin_producao/utils/mapeador_custos.dart';
@@ -28,16 +31,14 @@ class _TelaEstacaoTHState extends State<TelaEstacaoTH> {
     final idCracha = _limparCodigo(codigo);
 
     try {
-      final query = await FirebaseFirestore.instance
-          .collection('itens_os')
-          .where('osId', isEqualTo: widget.osIdAtual)
-          .where('idCrachaTemporario', isEqualTo: idCracha)
-          .where('status', isEqualTo: 'aguardando_th')
-          .limit(1)
-          .get();
+      final item = await context.read<ItemOsProvider>().buscarItemPorCracha(
+        widget.osIdAtual,
+        idCracha,
+        'aguardando_th',
+      );
 
-      if (query.docs.isNotEmpty) {
-        _irParaEnsaio(query.docs.first);
+      if (item != null) {
+        _irParaEnsaio(item);
       } else {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
@@ -52,15 +53,14 @@ class _TelaEstacaoTHState extends State<TelaEstacaoTH> {
     }
   }
 
-  void _irParaEnsaio(DocumentSnapshot doc) {
-    final dados = doc.data() as Map<String, dynamic>;
+  void _irParaEnsaio(Map<String, dynamic> item) {
     Navigator.push(
       context,
       MaterialPageRoute(
         builder: (context) => TelaEnsaioTH(
-          itemOsId: doc.id,
+          itemOsId: item['id'],
           osId: widget.osIdAtual,
-          dadosItem: dados,
+          dadosItem: item,
         ),
       ),
     );
@@ -92,67 +92,57 @@ class _TelaEstacaoTHState extends State<TelaEstacaoTH> {
           ),
           const Divider(height: 1),
           Expanded(
-            child: StreamBuilder<QuerySnapshot>(
-              stream: FirebaseFirestore.instance
-                  .collection('itens_os')
-                  .where('osId', isEqualTo: widget.osIdAtual)
-                  .where('status', isEqualTo: 'aguardando_th')
-                  .snapshots(),
+            child: StreamBuilder<List<Map<String, dynamic>>>(
+              stream: context
+                  .read<ItemOsProvider>()
+                  .streamItensPorOsEStatus(widget.osIdAtual, 'aguardando_th'),
               builder: (context, snapshot) {
                 if (!snapshot.hasData) {
                   return const Center(child: CircularProgressIndicator());
                 }
-                final itens = snapshot.data!.docs;
-
+                final itens = snapshot.data!;
                 if (itens.isEmpty) return _buildTelaConclusao();
 
                 return ListView.builder(
                   itemCount: itens.length,
                   itemBuilder: (context, index) {
-                    final itemDoc = itens[index];
-                    final dados =
-                    itemDoc.data() as Map<String, dynamic>;
-                    final idCracha =
-                        dados['idCrachaTemporario'] ?? '???';
+                    final item = itens[index];
+                    final idCracha = item['idCrachaTemporario'] ?? '???';
 
                     return Card(
                       margin: const EdgeInsets.symmetric(
                           horizontal: 12, vertical: 4),
                       child: ListTile(
-                        leading: Icon(Icons.science,
-                            color: Colors.blue.shade900),
+                        leading:
+                        Icon(Icons.science, color: Colors.blue.shade900),
                         title: Text('Crachá: $idCracha'),
                         subtitle: Text(
-                            'Agente: ${dados['tipoAgente']} | Cap: ${dados['capacidade'] ?? dados['carga'] ?? ''}'),
+                            'Agente: ${item['tipoAgente']} | Cap: ${item['capacidade'] ?? item['carga'] ?? ''}'),
                         trailing: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            BotaoCondenar(
-                                itemDoc: itemDoc, etapa: 'th'),
+                            BotaoCondenar(item: item, etapa: 'th'),
                             IconButton(
-                              icon: const Icon(
-                                  Icons.shopping_cart_checkout,
+                              icon: const Icon(Icons.shopping_cart_checkout,
                                   color: Colors.blue),
                               onPressed: () {
                                 Navigator.push(
                                   context,
                                   MaterialPageRoute(
-                                    builder: (context) =>
-                                        TelaCriarRequisicao(
-                                          osPrePreenchida:
-                                          widget.osIdAtual,
-                                          ccPrePreenchido:
-                                          MapeadorCustos.obterCC(
-                                              'TESTE HIDROSTÁTICO'),
-                                          subTipoPrePreenchido: 'OS',
-                                        ),
+                                    builder: (context) => TelaCriarRequisicao(
+                                      osPrePreenchida: widget.osIdAtual,
+                                      ccPrePreenchido:
+                                      MapeadorCustos.obterCC(
+                                          'TESTE HIDROSTÁTICO'),
+                                      subTipoPrePreenchido: 'OS',
+                                    ),
                                   ),
                                 );
                               },
                             ),
                           ],
                         ),
-                        onTap: () => _irParaEnsaio(itemDoc),
+                        onTap: () => _irParaEnsaio(item),
                       ),
                     );
                   },
@@ -173,8 +163,7 @@ class _TelaEstacaoTHState extends State<TelaEstacaoTH> {
           const Icon(Icons.check_circle, size: 80, color: Colors.green),
           const SizedBox(height: 20),
           const Text('Teste Hidro Concluído!',
-              style: TextStyle(
-                  fontSize: 22, fontWeight: FontWeight.bold)),
+              style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
           const SizedBox(height: 10),
           const Text('Todos os itens foram processados.'),
           const SizedBox(height: 30),

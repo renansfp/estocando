@@ -1,6 +1,8 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import 'package:protecin_producao/models/equipamento.dart';
+import 'package:protecin_producao/provider/equipamento_provider.dart';
+import 'package:protecin_producao/provider/item_os_provider.dart';
 import 'package:protecin_producao/widgets/campo_com_scanner.dart';
 import 'package:protecin_producao/telas/estoque/tela_criar_requisicao.dart';
 import 'package:protecin_producao/utils/mapeador_custos.dart';
@@ -20,24 +22,28 @@ class TelaEstacaoManutencaoValvula extends StatefulWidget {
   });
 
   @override
-  State<TelaEstacaoManutencaoValvula> createState() => _TelaEstacaoManutencaoValvulaState();
+  State<TelaEstacaoManutencaoValvula> createState() =>
+      _TelaEstacaoManutencaoValvulaState();
 }
 
-class _TelaEstacaoManutencaoValvulaState extends State<TelaEstacaoManutencaoValvula> {
+class _TelaEstacaoManutencaoValvulaState
+    extends State<TelaEstacaoManutencaoValvula> {
   final _controllerEtiqueta = TextEditingController();
   final _pesoVazioController = TextEditingController();
   final _pesoCheioController = TextEditingController();
   bool _buscando = false;
   bool _processando = false;
   Equipamento? _equipamentoAtual;
-  DocumentSnapshot? _itemOsAtual;
+  // Trocamos DocumentSnapshot por Map
+  Map<String, dynamic>? _itemOsAtual;
 
   @override
   void initState() {
     super.initState();
     _pesoVazioController.addListener(_calcularPesoFinal);
     if (widget.codigoPreDefinido != null) {
-      WidgetsBinding.instance.addPostFrameCallback((_) => _buscarItemPorBipe(widget.codigoPreDefinido!));
+      WidgetsBinding.instance.addPostFrameCallback(
+              (_) => _buscarItemPorBipe(widget.codigoPreDefinido!));
     }
   }
 
@@ -59,14 +65,17 @@ class _TelaEstacaoManutencaoValvulaState extends State<TelaEstacaoManutencaoValv
     if (_equipamentoAtual == null) return;
     try {
       String texto = _pesoVazioController.text.replaceAll(',', '.');
-      if (texto.isEmpty) { _pesoCheioController.clear(); return; }
+      if (texto.isEmpty) {
+        _pesoCheioController.clear();
+        return;
+      }
       double vazio = double.parse(texto);
-
-      // Extrai a carga (ex: "6kg" vira 6.0) para somar ao peso vazio
-      final numeros = RegExp(r'[0-9]+').firstMatch(_equipamentoAtual!.capacidade);
+      final numeros =
+      RegExp(r'[0-9]+').firstMatch(_equipamentoAtual!.capacidade);
       if (numeros != null) {
         double carga = double.parse(numeros.group(0)!);
-        _pesoCheioController.text = (vazio + carga).toStringAsFixed(2).replaceAll('.', ',');
+        _pesoCheioController.text =
+            (vazio + carga).toStringAsFixed(2).replaceAll('.', ',');
       }
     } catch (e) {}
   }
@@ -77,26 +86,33 @@ class _TelaEstacaoManutencaoValvulaState extends State<TelaEstacaoManutencaoValv
     _controllerEtiqueta.text = idLimpo;
 
     try {
-      // Busca garantindo que o item pertence à OS e está no status correto
-      final query = await FirebaseFirestore.instance
-          .collection('itens_os')
-          .where('osId', isEqualTo: widget.osId)
-          .where('idCrachaTemporario', isEqualTo: idLimpo)
-          .where('status', isEqualTo: 'aguardando_manutencao_valvula')
-          .limit(1).get();
+      // Busca o item via provider
+      final item = await context.read<ItemOsProvider>().buscarItemPorCracha(
+        widget.osId,
+        idLimpo,
+        'aguardando_manutencao_valvula',
+      );
 
-      if (query.docs.isNotEmpty) {
-        _itemOsAtual = query.docs.first;
-        final docEq = await FirebaseFirestore.instance.collection('equipamentos').doc(_itemOsAtual!['equipamentoId']).get();
-        if (docEq.exists) {
+      if (item != null) {
+        // Busca o equipamento via EquipamentoProvider
+        final equip = await context
+            .read<EquipamentoProvider>()
+            .buscarPorId(item['equipamentoId']);
+
+        if (equip != null) {
           setState(() {
-            _equipamentoAtual = Equipamento.fromJson(docEq.data() as Map<String, dynamic>, docEq.id);
+            _itemOsAtual = item;
+            _equipamentoAtual = equip;
             _pesoVazioController.clear();
             _pesoCheioController.clear();
           });
         }
       } else {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Cilindro não encontrado nesta OS ou status incorreto.')));
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+              content: Text(
+                  'Cilindro não encontrado nesta OS ou status incorreto.')));
+        }
       }
     } finally {
       if (mounted) setState(() => _buscando = false);
@@ -106,40 +122,31 @@ class _TelaEstacaoManutencaoValvulaState extends State<TelaEstacaoManutencaoValv
   Future<void> _salvarManutencao() async {
     if (_equipamentoAtual == null || _itemOsAtual == null) return;
     if (_pesoVazioController.text.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Por favor, informe o Peso Vazio.')));
+      ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Por favor, informe o Peso Vazio.')));
       return;
     }
 
     setState(() => _processando = true);
     try {
-      // Inteligência de Roteiro: identifica a próxima etapa automaticamente
-      final List<String> roteiro = List<String>.from(_itemOsAtual!['roteiro'] ?? []);
+      final List<String> roteiro =
+      List<String>.from(_itemOsAtual!['roteiro'] ?? []);
       int indexAtual = roteiro.indexOf('manutencao_valvula');
 
       if (indexAtual == -1 || indexAtual >= roteiro.length - 1) {
-        throw "Roteiro incompleto ou etapa final alcançada.";
+        throw 'Roteiro incompleto ou etapa final alcançada.';
       }
-
       String proximaEstacao = roteiro[indexAtual + 1];
-      final batch = FirebaseFirestore.instance.batch();
 
-      batch.update(FirebaseFirestore.instance.collection('equipamentos').doc(_equipamentoAtual!.id), {
-        'valvula_pesoVazio': _pesoVazioController.text,
-        'valvula_pesoCheioMeta': _pesoCheioController.text,
-        'valvula_data': DateTime.now().toIso8601String(),
-        'valvula_responsavel': widget.usuarioNome,
-      });
-
-      batch.update(_itemOsAtual!.reference, {
-        'status': 'aguardando_$proximaEstacao',
-        'manutencao_valvula': {
-          'data': FieldValue.serverTimestamp(),
-          'operador': widget.usuarioNome,
-          'pesoVazio': _pesoVazioController.text,
-        }
-      });
-
-      await batch.commit();
+      await context.read<ItemOsProvider>().salvarManutencaoValvula(
+        itemId: _itemOsAtual!['id'],
+        osId: widget.osId,
+        equipamentoId: _equipamentoAtual!.id,
+        operador: widget.usuarioNome,
+        pesoVazio: _pesoVazioController.text,
+        pesoCheioMeta: _pesoCheioController.text,
+        proximaEstacao: proximaEstacao,
+      );
 
       if (mounted) {
         setState(() {
@@ -147,11 +154,16 @@ class _TelaEstacaoManutencaoValvulaState extends State<TelaEstacaoManutencaoValv
           _itemOsAtual = null;
           _controllerEtiqueta.clear();
         });
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Manutenção finalizada!'), backgroundColor: Colors.teal));
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text('Manutenção finalizada!'),
+            backgroundColor: Colors.teal));
         if (widget.codigoPreDefinido != null) Navigator.pop(context);
       }
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Erro ao salvar: $e')));
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('Erro ao salvar: $e')));
+      }
     } finally {
       if (mounted) setState(() => _processando = false);
     }
@@ -164,22 +176,38 @@ class _TelaEstacaoManutencaoValvulaState extends State<TelaEstacaoManutencaoValv
         title: const Text('Bancada Válvula'),
         backgroundColor: Colors.teal.shade800,
         foregroundColor: Colors.white,
-        leading: IconButton(icon: const Icon(Icons.home), onPressed: () => Navigator.of(context).popUntil((r) => r.isFirst)),
+        leading: IconButton(
+          icon: const Icon(Icons.home),
+          onPressed: () =>
+              Navigator.of(context).popUntil((r) => r.isFirst),
+        ),
         actions: [
           IconButton(
             icon: const Icon(Icons.inventory_2),
-            onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (ctx) => TelaCriarRequisicao(
-              ccPrePreenchido: MapeadorCustos.obterCC('MANUTENÇÃO DE COMPONENTES'),
-              subTipoPrePreenchido: 'Colaborador',
-            ))),
+            onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (ctx) => TelaCriarRequisicao(
+                  ccPrePreenchido:
+                  MapeadorCustos.obterCC('MANUTENÇÃO DE COMPONENTES'),
+                  subTipoPrePreenchido: 'Colaborador',
+                ),
+              ),
+            ),
           ),
           IconButton(
             icon: const Icon(Icons.shopping_cart_checkout),
-            onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (ctx) => TelaCriarRequisicao(
-              osPrePreenchida: widget.osId,
-              ccPrePreenchido: MapeadorCustos.obterCC('MANUTENÇÃO DE COMPONENTES'),
-              subTipoPrePreenchido: 'OS',
-            ))),
+            onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (ctx) => TelaCriarRequisicao(
+                  osPrePreenchida: widget.osId,
+                  ccPrePreenchido:
+                  MapeadorCustos.obterCC('MANUTENÇÃO DE COMPONENTES'),
+                  subTipoPrePreenchido: 'OS',
+                ),
+              ),
+            ),
           ),
         ],
       ),
@@ -188,67 +216,117 @@ class _TelaEstacaoManutencaoValvulaState extends State<TelaEstacaoManutencaoValv
           Container(
             padding: const EdgeInsets.all(12),
             color: Colors.teal.shade50,
-            child: CampoComScanner(controller: _controllerEtiqueta, label: 'Bipar Crachá', onSubmitted: _buscarItemPorBipe),
+            child: CampoComScanner(
+              controller: _controllerEtiqueta,
+              label: 'Bipar Crachá',
+              onSubmitted: _buscarItemPorBipe,
+            ),
           ),
           if (_buscando || _processando) const LinearProgressIndicator(),
-
           if (_equipamentoAtual != null)
-          // 1. Visão de Trabalho (Quando um item foi bipado)
+          // Visão de Trabalho — item bipado
             Expanded(
               child: ListView(
                 padding: const EdgeInsets.all(16),
                 children: [
                   Card(
-                      color: Colors.teal.shade100,
-                      child: ListTile(
-                          title: Text('${_equipamentoAtual!.tipo} - ${_equipamentoAtual!.capacidade}'),
-                          subtitle: Text('Cilindro: ${_equipamentoAtual!.numeroCilindro}')
-                      )
+                    color: Colors.teal.shade100,
+                    child: ListTile(
+                      title: Text(
+                          '${_equipamentoAtual!.tipo} - ${_equipamentoAtual!.capacidade}'),
+                      subtitle:
+                      Text('Cilindro: ${_equipamentoAtual!.numeroCilindro}'),
+                    ),
                   ),
                   const SizedBox(height: 20),
-                  const Text("PESAGEM CO2", style: TextStyle(fontWeight: FontWeight.bold, color: Colors.teal)),
+                  const Text('PESAGEM CO2',
+                      style: TextStyle(
+                          fontWeight: FontWeight.bold, color: Colors.teal)),
                   const SizedBox(height: 10),
-                  Row(children: [
-                    Expanded(child: TextField(controller: _pesoVazioController, keyboardType: const TextInputType.numberWithOptions(decimal: true), decoration: const InputDecoration(labelText: 'Peso Vazio (Kg)', border: OutlineInputBorder()))),
-                    const Padding(padding: EdgeInsets.symmetric(horizontal: 8), child: Icon(Icons.arrow_forward)),
-                    Expanded(child: TextField(controller: _pesoCheioController, readOnly: true, decoration: const InputDecoration(labelText: 'Meta Peso Cheio', border: OutlineInputBorder(), filled: true))),
-                  ]),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          controller: _pesoVazioController,
+                          keyboardType: const TextInputType.numberWithOptions(
+                              decimal: true),
+                          decoration: const InputDecoration(
+                              labelText: 'Peso Vazio (Kg)',
+                              border: OutlineInputBorder()),
+                        ),
+                      ),
+                      const Padding(
+                        padding: EdgeInsets.symmetric(horizontal: 8),
+                        child: Icon(Icons.arrow_forward),
+                      ),
+                      Expanded(
+                        child: TextField(
+                          controller: _pesoCheioController,
+                          readOnly: true,
+                          decoration: const InputDecoration(
+                              labelText: 'Meta Peso Cheio',
+                              border: OutlineInputBorder(),
+                              filled: true),
+                        ),
+                      ),
+                    ],
+                  ),
                   const SizedBox(height: 30),
-                  SizedBox(height: 60, child: ElevatedButton(onPressed: _salvarManutencao, style: ElevatedButton.styleFrom(backgroundColor: Colors.teal.shade700), child: const Text("FINALIZAR MANUTENÇÃO", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)))),
+                  SizedBox(
+                    height: 60,
+                    child: ElevatedButton(
+                      onPressed: _salvarManutencao,
+                      style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.teal.shade700),
+                      child: const Text('FINALIZAR MANUTENÇÃO',
+                          style: TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.bold)),
+                    ),
+                  ),
                 ],
               ),
             )
           else
-          // 2. Visão de Espera (Mostra a fila da OS para o técnico)
+          // Visão de Espera — fila da OS
             Expanded(
               child: Column(
                 children: [
                   const Padding(
                     padding: EdgeInsets.all(16.0),
-                    child: Text("Componentes Pendentes nesta OS:", style: TextStyle(fontWeight: FontWeight.bold, color: Colors.teal)),
+                    child: Text('Componentes Pendentes nesta OS:',
+                        style: TextStyle(
+                            fontWeight: FontWeight.bold, color: Colors.teal)),
                   ),
                   Expanded(
-                    child: StreamBuilder<QuerySnapshot>(
-                      stream: FirebaseFirestore.instance
-                          .collection('itens_os')
-                          .where('osId', isEqualTo: widget.osId)
-                          .where('status', isEqualTo: 'aguardando_manutencao_valvula')
-                          .snapshots(),
+                    child: StreamBuilder<List<Map<String, dynamic>>>(
+                      stream: context
+                          .read<ItemOsProvider>()
+                          .streamItensPorOsEStatus(
+                          widget.osId, 'aguardando_manutencao_valvula'),
                       builder: (context, snapshot) {
                         if (!snapshot.hasData) return const SizedBox.shrink();
-                        final itens = snapshot.data!.docs;
+                        final itens = snapshot.data!;
 
-                        if (itens.isEmpty) return const Center(child: Text("Nenhum item pendente para esta bancada."));
+                        if (itens.isEmpty) {
+                          return const Center(
+                              child: Text(
+                                  'Nenhum item pendente para esta bancada.'));
+                        }
 
                         return ListView.builder(
                           itemCount: itens.length,
                           itemBuilder: (context, index) {
-                            final item = itens[index].data() as Map<String, dynamic>;
+                            final item = itens[index];
                             return ListTile(
-                              leading: const Icon(Icons.qr_code_scanner, color: Colors.teal),
-                              title: Text('Crachá: ${item['idCrachaTemporario']}'),
-                              subtitle: Text('Cilindro: ${item['numeroCilindro'] ?? 'Não informado'}'),
-                              onTap: () => _buscarItemPorBipe(item['idCrachaTemporario']), // Atalho por clique
+                              leading: const Icon(Icons.qr_code_scanner,
+                                  color: Colors.teal),
+                              title: Text(
+                                  'Crachá: ${item['idCrachaTemporario']}'),
+                              subtitle: Text(
+                                  'Cilindro: ${item['numeroCilindro'] ?? 'Não informado'}'),
+                              onTap: () => _buscarItemPorBipe(
+                                  item['idCrachaTemporario']),
                             );
                           },
                         );

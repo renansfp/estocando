@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:protecin_producao/models/item_os.dart';
-import 'package:protecin_producao/provider/usuario_provider.dart';
 import 'package:provider/provider.dart';
+import 'package:protecin_producao/provider/item_os_provider.dart';
+import 'package:protecin_producao/provider/usuario_provider.dart';
+import 'package:protecin_producao/models/item_os.dart';
 import 'package:protecin_producao/telas/producao/estacao/tela_balanco_lote.dart';
 import 'package:protecin_producao/telas/estoque/tela_criar_requisicao.dart';
 import 'package:protecin_producao/utils/mapeador_custos.dart';
@@ -22,8 +22,6 @@ class TelaEstacaoDescarga extends StatefulWidget {
 }
 
 class _TelaEstacaoDescargaState extends State<TelaEstacaoDescarga> {
-
-  // Função para formatar o ID da OS (Padrão Protecin)
   String _obterIdCurto(String idCompleto) {
     return idCompleto.length >= 5
         ? idCompleto.substring(idCompleto.length - 5).toUpperCase()
@@ -33,39 +31,39 @@ class _TelaEstacaoDescargaState extends State<TelaEstacaoDescarga> {
   @override
   Widget build(BuildContext context) {
     final usuario = Provider.of<UsuarioProvider>(context, listen: false).usuario;
-    if (usuario == null) return const Scaffold(body: Center(child: Text('Erro de usuário')));
+    if (usuario == null) {
+      return const Scaffold(body: Center(child: Text('Erro de usuário')));
+    }
 
     return Scaffold(
       appBar: AppBar(
         title: Text(widget.tituloEstacao),
         backgroundColor: Colors.blueGrey.shade800,
         foregroundColor: Colors.white,
-        // PADRÃO: Botão Home sempre à esquerda
         leading: IconButton(
           icon: const Icon(Icons.home),
           onPressed: () => Navigator.of(context).popUntil((route) => route.isFirst),
           tooltip: 'Ir para Home',
         ),
       ),
-      body: StreamBuilder<QuerySnapshot>(
-        stream: FirebaseFirestore.instance
-            .collection('itens_os')
-            .where('empresaId', isEqualTo: usuario.empresaId)
-            .where('status', isEqualTo: 'aguardando_descarga')
-            .where('tipoAgente', whereIn: widget.filtrosAgente)
-            .snapshots(),
+      body: StreamBuilder<List<Map<String, dynamic>>>(
+        stream: context.read<ItemOsProvider>().streamItensAguardandoDescarga(
+          usuario.empresaId,
+          widget.filtrosAgente,
+        ),
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting) {
             return const Center(child: CircularProgressIndicator());
           }
-          if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
-            return const Center(child: Text('Nenhuma OS aguardando descarga neste setor.'));
+          if (!snapshot.hasData || snapshot.data!.isEmpty) {
+            return const Center(
+                child: Text('Nenhuma OS aguardando descarga neste setor.'));
           }
 
-          // Agrupamento por OS para montar a fila
+          // Agrupa os itens por OS para montar a fila
           final Map<String, List<ItemOS>> lotesAgrupados = {};
-          for (final doc in snapshot.data!.docs) {
-            final item = ItemOS.fromJson(doc.data() as Map<String, dynamic>, doc.id);
+          for (final dados in snapshot.data!) {
+            final item = ItemOS.fromJson(dados, dados['id']);
             lotesAgrupados.putIfAbsent(item.osId, () => []).add(item);
           }
 
@@ -83,32 +81,30 @@ class _TelaEstacaoDescargaState extends State<TelaEstacaoDescarga> {
                 margin: const EdgeInsets.symmetric(vertical: 6),
                 child: ListTile(
                   onTap: () => Navigator.push(
-                      context,
-                      MaterialPageRoute(builder: (context) => TelaBalancoLote(
-                          osId: osId,
-                          filtrosAgente: widget.filtrosAgente
-                      ))
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => TelaBalancoLote(
+                        osId: osId,
+                        filtrosAgente: widget.filtrosAgente,
+                      ),
+                    ),
                   ),
-
-                  // PADRÃO: Avatar com ID Curto
                   leading: CircleAvatar(
                     backgroundColor: Colors.blueGrey.shade700,
                     child: Text(
-                        _obterIdCurto(osId),
-                        style: const TextStyle(fontSize: 10, color: Colors.white)
+                      _obterIdCurto(osId),
+                      style: const TextStyle(fontSize: 10, color: Colors.white),
                     ),
                   ),
-
-                  title: const Text('Ordem de Serviço', style: TextStyle(fontWeight: FontWeight.bold)),
-
+                  title: const Text('Ordem de Serviço',
+                      style: TextStyle(fontWeight: FontWeight.bold)),
                   subtitle: Text('$totalItens cilindros aguardando descarga'),
-
                   trailing: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      // BOTÃO DE REQUISIÇÃO (Frente Administrativa)
                       IconButton(
-                        icon: const Icon(Icons.shopping_cart_checkout, color: Colors.blue),
+                        icon: const Icon(Icons.shopping_cart_checkout,
+                            color: Colors.blue),
                         tooltip: 'Solicitar Material',
                         onPressed: () {
                           Navigator.push(
@@ -116,7 +112,8 @@ class _TelaEstacaoDescargaState extends State<TelaEstacaoDescarga> {
                             MaterialPageRoute(
                               builder: (context) => TelaCriarRequisicao(
                                 osPrePreenchida: osId,
-                                ccPrePreenchido: MapeadorCustos.obterCC('DESCARGA E PREPARAÇÃO'),
+                                ccPrePreenchido: MapeadorCustos.obterCC(
+                                    'DESCARGA E PREPARAÇÃO'),
                                 subTipoPrePreenchido: 'OS',
                               ),
                             ),

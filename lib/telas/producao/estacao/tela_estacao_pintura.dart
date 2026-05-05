@@ -1,7 +1,10 @@
+// lib/telas/producao/estacao/tela_estacao_pintura.dart
+
 import 'package:flutter/material.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:protecin_producao/widgets/campo_com_scanner.dart';
+import 'package:provider/provider.dart';
+import 'package:protecin_producao/provider/item_os_provider.dart';
 import 'package:protecin_producao/widgets/botao_condenar.dart';
+import 'package:protecin_producao/widgets/campo_com_scanner.dart';
 
 class TelaEstacaoPintura extends StatefulWidget {
   final String osId;
@@ -21,26 +24,28 @@ class _TelaEstacaoPinturaState extends State<TelaEstacaoPintura> {
     return limpo.replaceAll('R-', '');
   }
 
-  Future<void> _concluirPintura(String docId, Map<String, dynamic> dados) async {
+  Future<void> _concluirPintura(Map<String, dynamic> item) async {
     setState(() => _processandoBipe = true);
     try {
-      final List<String> roteiro = List<String>.from(dados['roteiro'] ?? []);
+      final List<String> roteiro = List<String>.from(item['roteiro'] ?? []);
       final int index = roteiro.indexOf('pintura');
       final String proxima = (index != -1 && index + 1 < roteiro.length)
           ? roteiro[index + 1]
           : 'recarga_abc';
 
-      await FirebaseFirestore.instance.collection('itens_os').doc(docId).update({
-        'status': 'aguardando_$proxima',
-        'dataPintura': FieldValue.serverTimestamp(),
-      });
+      await context.read<ItemOsProvider>().confirmarEtapa(
+        itemId: item['id'],
+        dadosItem: {'dataPintura': DateTime.now()},
+        osId: widget.osId,
+        statusPendente: 'aguardando_pintura',
+        proximaEstacao: proxima,
+      );
 
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-              content: Text('Pintura finalizada!'),
-              duration: Duration(seconds: 1)),
-        );
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Pintura finalizada!'),
+          duration: Duration(seconds: 1),
+        ));
       }
     } catch (e) {
       if (mounted) {
@@ -56,21 +61,19 @@ class _TelaEstacaoPinturaState extends State<TelaEstacaoPintura> {
     if (codigo.isEmpty) return;
     final idCracha = _limparCodigo(codigo);
 
-    final query = await FirebaseFirestore.instance
-        .collection('itens_os')
-        .where('osId', isEqualTo: widget.osId)
-        .where('idCrachaTemporario', isEqualTo: idCracha)
-        .where('status', isEqualTo: 'aguardando_pintura')
-        .limit(1)
-        .get();
+    final item = await context.read<ItemOsProvider>().buscarItemPorCracha(
+      widget.osId,
+      idCracha,
+      'aguardando_pintura',
+    );
 
-    if (query.docs.isNotEmpty) {
-      await _concluirPintura(
-          query.docs.first.id, query.docs.first.data() as Map<String, dynamic>);
+    if (item != null) {
+      await _concluirPintura(item);
     } else {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Cilindro não encontrado ou já pintado.')),
+          const SnackBar(
+              content: Text('Cilindro não encontrado ou já pintado.')),
         );
       }
     }
@@ -86,7 +89,8 @@ class _TelaEstacaoPinturaState extends State<TelaEstacaoPintura> {
         foregroundColor: Colors.white,
         leading: IconButton(
           icon: const Icon(Icons.home),
-          onPressed: () => Navigator.of(context).popUntil((r) => r.isFirst),
+          onPressed: () =>
+              Navigator.of(context).popUntil((r) => r.isFirst),
         ),
       ),
       body: Column(
@@ -102,26 +106,21 @@ class _TelaEstacaoPinturaState extends State<TelaEstacaoPintura> {
           ),
           if (_processandoBipe) const LinearProgressIndicator(),
           Expanded(
-            child: StreamBuilder<QuerySnapshot>(
-              stream: FirebaseFirestore.instance
-                  .collection('itens_os')
-                  .where('osId', isEqualTo: widget.osId)
-                  .where('status', isEqualTo: 'aguardando_pintura')
-                  .snapshots(),
+            child: StreamBuilder<List<Map<String, dynamic>>>(
+              stream: context
+                  .read<ItemOsProvider>()
+                  .streamItensPorOsEStatus(widget.osId, 'aguardando_pintura'),
               builder: (context, snapshot) {
                 if (!snapshot.hasData) {
                   return const Center(child: CircularProgressIndicator());
                 }
-                final itens = snapshot.data!.docs;
-
+                final itens = snapshot.data!;
                 if (itens.isEmpty) return _buildConcluido();
 
                 return ListView.builder(
                   itemCount: itens.length,
                   itemBuilder: (context, index) {
                     final item = itens[index];
-                    final dados = item.data() as Map<String, dynamic>;
-
                     return Card(
                       margin: const EdgeInsets.symmetric(
                           horizontal: 12, vertical: 6),
@@ -130,19 +129,17 @@ class _TelaEstacaoPinturaState extends State<TelaEstacaoPintura> {
                         leading: const Icon(Icons.format_paint,
                             color: Colors.brown),
                         title: Text(
-                          'Crachá: ${dados['idCrachaTemporario']}',
+                          'Crachá: ${item['idCrachaTemporario']}',
                           style: const TextStyle(fontWeight: FontWeight.bold),
                         ),
                         subtitle: Text(
-                            '${dados['tipoAgente']} - ${dados['capacidade'] ?? dados['carga'] ?? ''}'),
+                            '${item['tipoAgente']} - ${item['capacidade'] ?? item['carga'] ?? ''}'),
                         trailing: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            BotaoCondenar(
-                                itemDoc: item, etapa: 'pintura'),
+                            BotaoCondenar(item: item, etapa: 'pintura'),
                             ElevatedButton(
-                              onPressed: () =>
-                                  _concluirPintura(item.id, dados),
+                              onPressed: () => _concluirPintura(item),
                               style: ElevatedButton.styleFrom(
                                 backgroundColor: Colors.green,
                                 foregroundColor: Colors.white,

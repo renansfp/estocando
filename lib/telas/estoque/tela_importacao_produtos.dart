@@ -1,11 +1,13 @@
-// CÓDIGO COMPLETO E SEGURO COM LÓGICA DE MULTI-EMPRESA
+// lib/telas/estoque/tela_importacao_produtos.dart
+// Migrada para Repository Pattern — sem acesso direto ao Firestore.
 
 import 'dart:convert';
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:flutter/foundation.dart';
-import 'package:flutter/material.dart';
-import 'package:file_picker/file_picker.dart';
 import 'package:csv/csv.dart';
+import 'package:file_picker/file_picker.dart';
+import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import 'package:protecin_producao/provider/produto_provider.dart';
+import 'package:protecin_producao/provider/usuario_provider.dart';
 
 class TelaImportacaoProdutos extends StatefulWidget {
   const TelaImportacaoProdutos({super.key});
@@ -14,19 +16,13 @@ class TelaImportacaoProdutos extends StatefulWidget {
   State<TelaImportacaoProdutos> createState() => _TelaImportacaoProdutosState();
 }
 
-enum StatusImportacao {
-  inicial,
-  carregando,
-  sucesso,
-  erro,
-}
+enum _StatusImportacao { inicial, carregando, sucesso, erro }
 
 class _TelaImportacaoProdutosState extends State<TelaImportacaoProdutos> {
-  StatusImportacao _status = StatusImportacao.inicial;
+  _StatusImportacao _status = _StatusImportacao.inicial;
   String _mensagemStatus = 'Selecione uma empresa para começar.';
   FilePickerResult? _resultadoPicker;
 
-  // ---> MUDANÇA 1: Novas variáveis para gerenciar a seleção de empresas.
   List<Map<String, String>> _listaEmpresas = [];
   Map<String, String>? _empresaSelecionada;
   bool _carregandoEmpresas = true;
@@ -34,44 +30,24 @@ class _TelaImportacaoProdutosState extends State<TelaImportacaoProdutos> {
   @override
   void initState() {
     super.initState();
-    _carregarEmpresas(); // ---> MUDANÇA 2: Chamamos a função para buscar as empresas.
+    WidgetsBinding.instance.addPostFrameCallback((_) => _carregarEmpresas());
   }
 
-  // ---> MUDANÇA 3: Nova função para buscar todas as empresas cadastradas.
   Future<void> _carregarEmpresas() async {
     try {
-      final usuariosSnapshot = await FirebaseFirestore.instance.collection('usuarios').get();
-      if (!mounted) return;
-
-      final Map<String, String> empresasMap = {};
-      for (var userDoc in usuariosSnapshot.docs) {
-        final data = userDoc.data();
-        final empresaId = data['empresaId'] as String?;
-        // Usaremos o nome do primeiro usuário encontrado como "nome" da empresa para exibição.
-        final nomeEmpresa = data['nome'] as String?;
-
-        if (empresaId != null && nomeEmpresa != null) {
-          // Adiciona ao mapa para evitar duplicatas, associando ID ao nome.
-          empresasMap.putIfAbsent(empresaId, () => nomeEmpresa);
-        }
+      final lista =
+      await context.read<UsuarioProvider>().buscarTodasEmpresas();
+      if (mounted) {
+        setState(() {
+          _listaEmpresas = lista;
+          _carregandoEmpresas = false;
+        });
       }
-
-      final
-
-      listaFormatada = empresasMap.entries.map((entry) {
-        return {'id': entry.key, 'nome': entry.value};
-      }).toList();
-
-      setState(() {
-        _listaEmpresas = listaFormatada;
-        _carregandoEmpresas = false;
-      });
-
     } catch (e) {
       if (mounted) {
         setState(() {
-          _mensagemStatus = "Erro ao carregar empresas: $e";
-          _status = StatusImportacao.erro;
+          _mensagemStatus = 'Erro ao carregar empresas: $e';
+          _status = _StatusImportacao.erro;
           _carregandoEmpresas = false;
         });
       }
@@ -80,63 +56,71 @@ class _TelaImportacaoProdutosState extends State<TelaImportacaoProdutos> {
 
   Future<void> _selecionarArquivo() async {
     if (_empresaSelecionada == null) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Por favor, selecione uma empresa primeiro.'), backgroundColor: Colors.orange));
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Por favor, selecione uma empresa primeiro.'),
+        backgroundColor: Colors.orange,
+      ));
       return;
     }
     try {
-      final resultado = await FilePicker.platform.pickFiles(type: FileType.custom, allowedExtensions: ['csv'], withData: true);
+      final resultado = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: ['csv'],
+        withData: true,
+      );
       if (resultado != null) {
         setState(() {
           _resultadoPicker = resultado;
-          _mensagemStatus = 'Arquivo selecionado: ${resultado.files.first.name}';
-          _status = StatusImportacao.inicial;
+          _mensagemStatus =
+          'Arquivo selecionado: ${resultado.files.first.name}';
+          _status = _StatusImportacao.inicial;
         });
       }
     } catch (e) {
       setState(() {
-        _status = StatusImportacao.erro;
+        _status = _StatusImportacao.erro;
         _mensagemStatus = 'Erro ao selecionar o arquivo: $e';
       });
     }
   }
 
   Future<void> _iniciarImportacao() async {
-    // ---> MUDANÇA 4: Verificação de segurança para garantir que uma empresa foi selecionada.
-    if (_empresaSelecionada == null || _empresaSelecionada!['id'] == null) {
-      setState(() { _status = StatusImportacao.erro; _mensagemStatus = 'Por favor, selecione uma empresa válida.'; });
-      return;
-    }
+    if (_empresaSelecionada == null || _resultadoPicker == null) return;
 
-    if (_resultadoPicker == null) {
-      setState(() { _status = StatusImportacao.erro; _mensagemStatus = 'Por favor, selecione um arquivo primeiro.'; });
-      return;
-    }
-
-    setState(() { _status = StatusImportacao.carregando; _mensagemStatus = 'Iniciando importação...'; });
+    setState(() {
+      _status = _StatusImportacao.carregando;
+      _mensagemStatus = 'Verificando produtos existentes na empresa...';
+    });
 
     try {
-      setState(() { _mensagemStatus = 'Verificando produtos existentes na empresa...'; });
-      final db = FirebaseFirestore.instance;
+      final empresaId = _empresaSelecionada!['id']!;
+      final produtoProvider = context.read<ProdutoProvider>();
 
-      // ---> MUDANÇA 5: A verificação de duplicidade agora é segura e filtra por empresa.
-      final produtosSnapshot = await db.collection('produtos')
-          .where('empresaId', isEqualTo: _empresaSelecionada!['id'])
-          .get();
-      final codigosExistentes = produtosSnapshot.docs.map((doc) => doc['codigo'] as String).toSet();
+      // 1. Busca códigos já cadastrados para evitar duplicatas
+      final codigosExistentes =
+      await produtoProvider.buscarCodigosExistentes(empresaId);
 
-      setState(() { _mensagemStatus = 'Lendo arquivo CSV...'; });
+      setState(() => _mensagemStatus = 'Lendo arquivo CSV...');
+
       final bytes = _resultadoPicker!.files.first.bytes!;
-      final conteudoArquivo = utf8.decode(bytes);
+      final conteudo = utf8.decode(bytes);
 
-      final primeiraLinha = conteudoArquivo.split('\n').first;
-      final String delimitador = (primeiraLinha.split(';').length > primeiraLinha.split(',').length) ? ';' : ',';
+      final primeiraLinha = conteudo.split('\n').first;
+      final delimitador =
+      (primeiraLinha.split(';').length > primeiraLinha.split(',').length)
+          ? ';'
+          : ',';
 
-      final List<List<dynamic>> linhas = CsvToListConverter(fieldDelimiter: delimitador).convert(conteudoArquivo);
+      final List<List<dynamic>> linhas =
+      CsvToListConverter(fieldDelimiter: delimitador).convert(conteudo);
 
-      if (linhas.length <= 1) throw Exception("O arquivo CSV está vazio ou contém apenas o cabeçalho.");
+      if (linhas.length <= 1) {
+        throw Exception(
+            'O arquivo CSV está vazio ou contém apenas o cabeçalho.');
+      }
 
-      final batch = db.batch();
-      int produtosNovos = 0;
+      // 2. Monta a lista de produtos novos (ignora códigos duplicados)
+      final List<Map<String, dynamic>> novosProdutos = [];
       int produtosIgnorados = 0;
 
       for (int i = 1; i < linhas.length; i++) {
@@ -144,44 +128,51 @@ class _TelaImportacaoProdutosState extends State<TelaImportacaoProdutos> {
         if (linha.length < 8) continue;
 
         final codigo = linha[0].toString().trim();
-        if (codigosExistentes.contains(codigo) || codigo.isEmpty) {
+        if (codigo.isEmpty || codigosExistentes.contains(codigo)) {
           produtosIgnorados++;
           continue;
         }
 
-        final novoProdutoRef = db.collection('produtos').doc();
-        batch.set(novoProdutoRef, {
-          // ---> MUDANÇA 6: "Carimbamos" o novo produto com o ID da empresa selecionada.
-          'empresaId': _empresaSelecionada!['id'],
+        novosProdutos.add({
+          'empresaId': empresaId,
           'codigo': codigo,
           'nome': linha[1].toString().trim(),
-          'valor': double.tryParse(linha[2].toString().replaceAll(',', '.')) ?? 0.0,
+          'valor':
+          double.tryParse(linha[2].toString().replaceAll(',', '.')) ?? 0.0,
           'unidade': linha[3].toString().trim(),
           'tipo': linha[4].toString().trim(),
           'grupo': linha[5].toString().trim().toUpperCase(),
-          'estoqueMinimo': double.tryParse(linha[6].toString().replaceAll(',', '.')) ?? 0.0,
-          'estoqueMaximo': double.tryParse(linha[7].toString().replaceAll(',', '.')) ?? 0.0,
+          'estoqueMinimo':
+          double.tryParse(linha[6].toString().replaceAll(',', '.')) ?? 0.0,
+          'estoqueMaximo':
+          double.tryParse(linha[7].toString().replaceAll(',', '.')) ?? 0.0,
           'quantidadeAtual': 0.0,
-          'ativo': true, // Por padrão, produtos importados são ativos.
+          'ativo': true,
           'numeroSC': null,
-          'timestamp': FieldValue.serverTimestamp(),
         });
-        produtosNovos++;
       }
 
-      if (produtosNovos > 0) {
-        setState(() { _mensagemStatus = 'Salvando $produtosNovos produtos no banco de dados...'; });
-        await batch.commit();
+      // 3. Importa em batch
+      if (novosProdutos.isNotEmpty) {
+        setState(() =>
+        _mensagemStatus = 'Salvando ${novosProdutos.length} produtos...');
+        final criados = await produtoProvider.importarLote(novosProdutos);
+        setState(() {
+          _status = _StatusImportacao.sucesso;
+          _mensagemStatus = 'Importação Concluída!\n\n'
+              '$criados produtos cadastrados para: ${_empresaSelecionada!['nome']}.\n'
+              '$produtosIgnorados produtos ignorados (código duplicado ou vazio).';
+        });
+      } else {
+        setState(() {
+          _status = _StatusImportacao.sucesso;
+          _mensagemStatus = 'Nenhum produto novo encontrado.\n'
+              '$produtosIgnorados produtos ignorados (já cadastrados ou sem código).';
+        });
       }
-
-      setState(() {
-        _status = StatusImportacao.sucesso;
-        _mensagemStatus = 'Importação Concluída!\n\n$produtosNovos produtos cadastrados para a empresa: ${_empresaSelecionada!['nome']}.\n$produtosIgnorados produtos ignorados (código duplicado ou vazio).';
-      });
-
     } catch (e) {
       setState(() {
-        _status = StatusImportacao.erro;
+        _status = _StatusImportacao.erro;
         _mensagemStatus = 'ERRO: $e';
       });
     }
@@ -196,12 +187,12 @@ class _TelaImportacaoProdutosState extends State<TelaImportacaoProdutos> {
       ),
       body: Center(
         child: Padding(
-          padding: const EdgeInsets.all(24.0),
+          padding: const EdgeInsets.all(24),
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              // ---> MUDANÇA 7: Novo Dropdown para selecionar a empresa.
+              // Seletor de empresa
               if (_carregandoEmpresas)
                 const Center(child: CircularProgressIndicator())
               else
@@ -215,14 +206,14 @@ class _TelaImportacaoProdutosState extends State<TelaImportacaoProdutos> {
                       child: Text(empresa['nome'] ?? 'Empresa Desconhecida'),
                     );
                   }).toList(),
-                  onChanged: (valor) {
-                    setState(() {
-                      _empresaSelecionada = valor;
-                      _mensagemStatus = 'Empresa selecionada. Agora selecione o arquivo CSV.';
-                      _resultadoPicker = null; // Reseta a seleção de arquivo
-                    });
-                  },
-                  decoration: const InputDecoration(border: OutlineInputBorder()),
+                  onChanged: (valor) => setState(() {
+                    _empresaSelecionada = valor;
+                    _mensagemStatus =
+                    'Empresa selecionada. Agora selecione o arquivo CSV.';
+                    _resultadoPicker = null;
+                  }),
+                  decoration:
+                  const InputDecoration(border: OutlineInputBorder()),
                 ),
 
               const SizedBox(height: 24),
@@ -233,28 +224,30 @@ class _TelaImportacaoProdutosState extends State<TelaImportacaoProdutos> {
                 style: ElevatedButton.styleFrom(
                   padding: const EdgeInsets.symmetric(vertical: 16),
                   textStyle: const TextStyle(fontSize: 16),
-                  // O botão só fica ativo depois de selecionar uma empresa.
-                  disabledBackgroundColor: Colors.grey.shade300,
                 ),
-                onPressed: _empresaSelecionada != null ? _selecionarArquivo : null,
+                onPressed:
+                _empresaSelecionada != null ? _selecionarArquivo : null,
               ),
+
               const SizedBox(height: 24),
 
               _buildWidgetDeStatus(),
+
               const SizedBox(height: 32),
 
               ElevatedButton(
                 style: ElevatedButton.styleFrom(
                   padding: const EdgeInsets.symmetric(vertical: 16),
-                  textStyle: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                  textStyle: const TextStyle(
+                      fontSize: 18, fontWeight: FontWeight.bold),
                   backgroundColor: Colors.green,
                   foregroundColor: Colors.white,
-                  disabledBackgroundColor: Colors.grey.shade400,
                 ),
-                onPressed: (_resultadoPicker != null && _status != StatusImportacao.carregando)
+                onPressed: (_resultadoPicker != null &&
+                    _status != _StatusImportacao.carregando)
                     ? _iniciarImportacao
                     : null,
-                child: _status == StatusImportacao.carregando
+                child: _status == _StatusImportacao.carregando
                     ? const CircularProgressIndicator(color: Colors.white)
                     : const Text('Iniciar Importação'),
               ),
@@ -267,30 +260,28 @@ class _TelaImportacaoProdutosState extends State<TelaImportacaoProdutos> {
 
   Widget _buildWidgetDeStatus() {
     switch (_status) {
-      case StatusImportacao.carregando:
-        return Center(
-          child: Column(
-            children: [
-              const CircularProgressIndicator(),
-              const SizedBox(height: 10),
-              Text(_mensagemStatus, textAlign: TextAlign.center),
-            ],
-          ),
+      case _StatusImportacao.carregando:
+        return Column(
+          children: [
+            const CircularProgressIndicator(),
+            const SizedBox(height: 10),
+            Text(_mensagemStatus, textAlign: TextAlign.center),
+          ],
         );
-      case StatusImportacao.sucesso:
+      case _StatusImportacao.sucesso:
         return Text(
           _mensagemStatus,
           textAlign: TextAlign.center,
-          style: const TextStyle(fontSize: 16, color: Colors.green, fontWeight: FontWeight.bold),
+          style: const TextStyle(
+              fontSize: 16, color: Colors.green, fontWeight: FontWeight.bold),
         );
-      case StatusImportacao.erro:
+      case _StatusImportacao.erro:
         return Text(
           _mensagemStatus,
           textAlign: TextAlign.center,
-          style: const TextStyle(fontSize: 16, color: Colors.red, fontWeight: FontWeight.bold),
+          style: const TextStyle(fontSize: 16, color: Colors.red),
         );
-      case StatusImportacao.inicial:
-      default:
+      case _StatusImportacao.inicial:
         return Text(
           _mensagemStatus,
           textAlign: TextAlign.center,

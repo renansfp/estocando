@@ -1,7 +1,6 @@
 // Arquivo: lib/services/gerador_pdf_os.dart
 // Relatório Técnico de OS — A4 Landscape, 28 colunas (A..AB).
 
-import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:pdf/pdf.dart';
@@ -212,7 +211,7 @@ class GeradorPdfOS {
   // 2. INFO CLIENTE
   // =========================================================================
   pw.Widget _infoCliente(DadosRelatorioOS d, pw.Font bold, pw.Font reg) {
-    final os = d.os;
+
     final p  = d.parceiro;
     final dataTriagem = _resolverDataTriagem(d);
     final dataFim     = d.dataFinalizacao != null ? _fmt.format(d.dataFinalizacao!) : '---';

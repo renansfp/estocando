@@ -1,14 +1,13 @@
 import 'package:flutter/material.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:provider/provider.dart';
+import 'package:protecin_producao/provider/item_os_provider.dart';
 import 'package:protecin_producao/widgets/campo_com_scanner.dart';
-import 'package:protecin_producao/widgets/botao_condenar.dart';
 import 'package:protecin_producao/telas/producao/estacao/tela_execucao_montagem.dart';
 import 'package:protecin_producao/telas/estoque/tela_criar_requisicao.dart';
 import 'package:protecin_producao/utils/mapeador_custos.dart';
 
 class TelaEstacaoMontagem extends StatefulWidget {
   final String osId;
-
   const TelaEstacaoMontagem({super.key, required this.osId});
 
   @override
@@ -25,30 +24,38 @@ class _TelaEstacaoMontagemState extends State<TelaEstacaoMontagem> {
     return limpo.replaceAll('R-', '');
   }
 
-  void _irParaExecucao(DocumentSnapshot doc) {
-    Navigator.push(context, MaterialPageRoute(builder: (context) => TelaExecucaoMontagem(
-      itemDoc: doc,
-      osId: widget.osId,
-    )));
+  // Agora recebe Map em vez de DocumentSnapshot
+  void _irParaExecucao(Map<String, dynamic> item) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => TelaExecucaoMontagem(
+          item: item,
+          osId: widget.osId,
+        ),
+      ),
+    );
   }
 
   Future<void> _processarBipe(String codigo) async {
     if (codigo.isEmpty) return;
     String idCracha = _limparCodigo(codigo);
 
-    final query = await FirebaseFirestore.instance
-        .collection('itens_os')
-        .where('osId', isEqualTo: widget.osId)
-        .where('idCrachaTemporario', isEqualTo: idCracha)
-        .where('status', isEqualTo: 'aguardando_montagem')
-        .limit(1).get();
+    final item = await context.read<ItemOsProvider>().buscarItemPorCracha(
+      widget.osId,
+      idCracha,
+      'aguardando_montagem',
+    );
 
-    if (query.docs.isNotEmpty) {
-      _irParaExecucao(query.docs.first);
+    if (item != null) {
+      _irParaExecucao(item);
     } else {
-      ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Crachá não encontrado nesta OS ou já finalizado.'))
-      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+              content: Text('Crachá não encontrado nesta OS ou já finalizado.')),
+        );
+      }
     }
     _scannerController.clear();
   }
@@ -61,24 +68,32 @@ class _TelaEstacaoMontagemState extends State<TelaEstacaoMontagem> {
         backgroundColor: corSetor,
         foregroundColor: Colors.white,
         actions: [
-          // Requisição para o SETOR (CC 4224)
           IconButton(
             icon: const Icon(Icons.inventory_2),
             tooltip: 'Requisição para o Setor',
-            onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (ctx) => TelaCriarRequisicao(
-              ccPrePreenchido: MapeadorCustos.obterCC('MONTAGEM'),
-              subTipoPrePreenchido: 'Colaborador',
-            ))),
+            onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (ctx) => TelaCriarRequisicao(
+                  ccPrePreenchido: MapeadorCustos.obterCC('MONTAGEM'),
+                  subTipoPrePreenchido: 'Colaborador',
+                ),
+              ),
+            ),
           ),
-          // Requisição para a OS
           IconButton(
             icon: const Icon(Icons.shopping_cart_checkout),
             tooltip: 'Material para esta OS',
-            onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (ctx) => TelaCriarRequisicao(
-              osPrePreenchida: widget.osId,
-              ccPrePreenchido: MapeadorCustos.obterCC('MONTAGEM'),
-              subTipoPrePreenchido: 'OS',
-            ))),
+            onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (ctx) => TelaCriarRequisicao(
+                  osPrePreenchida: widget.osId,
+                  ccPrePreenchido: MapeadorCustos.obterCC('MONTAGEM'),
+                  subTipoPrePreenchido: 'OS',
+                ),
+              ),
+            ),
           ),
         ],
       ),
@@ -94,39 +109,37 @@ class _TelaEstacaoMontagemState extends State<TelaEstacaoMontagem> {
             ),
           ),
           Expanded(
-            child: StreamBuilder<QuerySnapshot>(
-              stream: FirebaseFirestore.instance
-                  .collection('itens_os')
-                  .where('osId', isEqualTo: widget.osId)
-                  .where('status', isEqualTo: 'aguardando_montagem')
-                  .snapshots(),
+            child: StreamBuilder<List<Map<String, dynamic>>>(
+              stream: context
+                  .read<ItemOsProvider>()
+                  .streamItensPorOsEStatus(widget.osId, 'aguardando_montagem'),
               builder: (context, snapshot) {
-                if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
-                final itens = snapshot.data!.docs;
+                if (!snapshot.hasData) {
+                  return const Center(child: CircularProgressIndicator());
+                }
+                final itens = snapshot.data!;
                 if (itens.isEmpty) return _buildConcluido();
 
                 return ListView.builder(
                   padding: const EdgeInsets.symmetric(vertical: 8),
                   itemCount: itens.length,
                   itemBuilder: (context, index) {
-                    final d = itens[index].data() as Map<String, dynamic>;
+                    final item = itens[index];
                     return Card(
-                      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                      margin: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 4),
                       child: ListTile(
                         leading: CircleAvatar(
                           backgroundColor: corSetor.withOpacity(0.1),
                           child: Icon(Icons.verified, color: corSetor),
                         ),
-                        title: Text('Crachá: ${d['idCrachaTemporario']}', style: const TextStyle(fontWeight: FontWeight.bold)),
-                        subtitle: Text('${d['tipoAgente']} ${d['capacidade']} - Aguardando Lacração'),
-                        trailing: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            BotaoCondenar(itemDoc: itens[index], etapa: 'montagem'),
-                            const Icon(Icons.arrow_forward_ios, size: 14),
-                          ],
-                        ),
-                        onTap: () => _irParaExecucao(itens[index]),
+                        title: Text('Crachá: ${item['idCrachaTemporario']}',
+                            style:
+                            const TextStyle(fontWeight: FontWeight.bold)),
+                        subtitle: Text(
+                            '${item['tipoAgente']} ${item['capacidade']} - Aguardando Lacração'),
+                        trailing: const Icon(Icons.arrow_forward_ios, size: 14),
+                        onTap: () => _irParaExecucao(item),
                       ),
                     );
                   },
@@ -144,10 +157,13 @@ class _TelaEstacaoMontagemState extends State<TelaEstacaoMontagem> {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(Icons.check_circle_rounded, size: 100, color: Colors.green.shade600),
+          Icon(Icons.check_circle_rounded,
+              size: 100, color: Colors.green.shade600),
           const SizedBox(height: 20),
-          const Text('OS Montada e Selada!', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
-          const Text('O lote já pode seguir para a Expedição.', style: TextStyle(color: Colors.grey)),
+          const Text('OS Montada e Selada!',
+              style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
+          const Text('O lote já pode seguir para a Expedição.',
+              style: TextStyle(color: Colors.grey)),
           const SizedBox(height: 30),
           ElevatedButton.icon(
             onPressed: () => Navigator.pop(context),
@@ -156,7 +172,8 @@ class _TelaEstacaoMontagemState extends State<TelaEstacaoMontagem> {
             style: ElevatedButton.styleFrom(
               backgroundColor: corSetor,
               foregroundColor: Colors.white,
-              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+              padding:
+              const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
             ),
           ),
         ],

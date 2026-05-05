@@ -1,9 +1,11 @@
-// Salve como: lib/telas/producao/tela_lista_os.dart
-// (VERSÃO CORRIGIDA - Lê os campos corretos do banco)
+// lib/telas/producao/tela_lista_os.dart
+// Migrada para Repository Pattern — sem acesso direto ao Firestore.
 
-import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:cloud_firestore/cloud_firestore.dart'; // apenas Timestamp (nos Maps retornados)
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:provider/provider.dart';
+import 'package:protecin_producao/provider/ordem_servico_provider.dart';
 import 'package:protecin_producao/telas/producao/tela_criar_os.dart';
 import 'package:protecin_producao/telas/producao/tela_detalhe_os.dart';
 
@@ -35,7 +37,7 @@ class _TelaListaOSState extends State<TelaListaOS> {
       ),
       body: Column(
         children: [
-          // FILTROS
+          // Barra de filtros
           Container(
             color: Colors.red.shade900,
             padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
@@ -47,93 +49,135 @@ class _TelaListaOSState extends State<TelaListaOS> {
                     style: const TextStyle(color: Colors.white),
                     decoration: InputDecoration(
                       hintText: 'Buscar Cliente ou Nº OS...',
-                      hintStyle: TextStyle(color: Colors.white.withOpacity(0.7)),
-                      prefixIcon: const Icon(Icons.search, color: Colors.white),
+                      hintStyle:
+                      TextStyle(color: Colors.white.withOpacity(0.7)),
+                      prefixIcon:
+                      const Icon(Icons.search, color: Colors.white),
                       filled: true,
                       fillColor: Colors.white.withOpacity(0.2),
-                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide.none),
-                      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                      border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(10),
+                          borderSide: BorderSide.none),
+                      contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 16, vertical: 8),
                     ),
-                    onChanged: (val) => setState(() => _textoBusca = val.toUpperCase()),
+                    onChanged: (val) =>
+                        setState(() => _textoBusca = val.toUpperCase()),
                   ),
                 ),
                 const SizedBox(width: 8),
                 IconButton(
-                  icon: Icon(_ocultarFinalizadas ? Icons.visibility_off : Icons.visibility, color: Colors.white),
-                  onPressed: () => setState(() => _ocultarFinalizadas = !_ocultarFinalizadas),
+                  icon: Icon(
+                    _ocultarFinalizadas
+                        ? Icons.visibility_off
+                        : Icons.visibility,
+                    color: Colors.white,
+                  ),
+                  tooltip: _ocultarFinalizadas
+                      ? 'Mostrar finalizadas'
+                      : 'Ocultar finalizadas',
+                  onPressed: () =>
+                      setState(() => _ocultarFinalizadas = !_ocultarFinalizadas),
                 ),
               ],
             ),
           ),
 
-          // LISTA
+          // Lista de OS
           Expanded(
-            child: StreamBuilder<QuerySnapshot>(
-              stream: FirebaseFirestore.instance
-                  .collection('ordens_servico')
-              // CORREÇÃO: Usar 'dataEntrada' (que é o que estamos salvando)
-                  .orderBy('dataEntrada', descending: true)
-                  .snapshots(),
+            child: StreamBuilder<List<Map<String, dynamic>>>(
+              stream: context
+                  .read<OrdemServicoProvider>()
+                  .streamTodasOrdenadas(),
               builder: (context, snapshot) {
-                if (snapshot.hasError) return Center(child: Text('Erro: ${snapshot.error}'));
-                if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
+                if (snapshot.hasError) {
+                  return Center(child: Text('Erro: ${snapshot.error}'));
+                }
+                if (!snapshot.hasData) {
+                  return const Center(child: CircularProgressIndicator());
+                }
 
-                final docs = snapshot.data!.docs;
+                var lista = snapshot.data!;
 
-                // Filtragem manual
-                final docsFiltrados = docs.where((doc) {
-                  final dados = doc.data() as Map<String, dynamic>;
-                  final cliente = (dados['clienteNome'] ?? '').toString().toUpperCase();
-                  final numeroOS = (dados['numeroOS'] ?? '').toString().toUpperCase();
+                // Filtro em memória por texto e status
+                if (_textoBusca.isNotEmpty) {
+                  lista = lista.where((os) {
+                    final cliente =
+                    (os['clienteNome'] ?? '').toString().toUpperCase();
+                    final numero =
+                    (os['numeroOS'] ?? '').toString().toUpperCase();
+                    return cliente.contains(_textoBusca) ||
+                        numero.contains(_textoBusca);
+                  }).toList();
+                }
 
-                  // CORREÇÃO: Usar 'statusLote' em vez de 'statusGeral'
-                  final status = (dados['statusLote'] ?? 'na_descarga').toString();
+                if (_ocultarFinalizadas) {
+                  lista = lista.where((os) {
+                    final status =
+                    (os['statusLote'] ?? '').toString();
+                    return !status.contains('finaliz');
+                  }).toList();
+                }
 
-                  bool bateTexto = cliente.contains(_textoBusca) || numeroOS.contains(_textoBusca);
-                  bool bateStatus = _ocultarFinalizadas ? !status.contains('finaliz') : true;
-
-                  return bateTexto && bateStatus;
-                }).toList();
-
-                if (docsFiltrados.isEmpty) {
-                  return const Center(child: Text("Nenhuma OS encontrada."));
+                if (lista.isEmpty) {
+                  return const Center(child: Text('Nenhuma OS encontrada.'));
                 }
 
                 return ListView.builder(
-                  itemCount: docsFiltrados.length,
+                  itemCount: lista.length,
                   itemBuilder: (context, index) {
-                    final doc = docsFiltrados[index];
-                    final os = doc.data() as Map<String, dynamic>;
-                    final osId = doc.id;
+                    final os = lista[index];
+                    final osId = os['id'] as String;
 
-                    // CORREÇÃO: Usar 'dataEntrada'
                     String dataFormatada = '---';
                     if (os['dataEntrada'] != null) {
                       try {
-                        DateTime dt = (os['dataEntrada'] as Timestamp).toDate();
-                        dataFormatada = DateFormat('dd/MM/yyyy').format(dt);
-                      } catch (e) {}
+                        final dt =
+                        (os['dataEntrada'] as Timestamp).toDate();
+                        dataFormatada =
+                            DateFormat('dd/MM/yyyy').format(dt);
+                      } catch (_) {}
                     }
 
-                    // CORREÇÃO: Usar 'statusLote'
-                    final status = os['statusLote'] ?? 'Aberto';
+                    final status =
+                    (os['statusLote'] ?? 'Aberto').toString();
+                    final numeroOS =
+                        os['numeroOS']?.toString() ?? '#';
 
                     return Card(
-                      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                      margin: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 6),
                       child: ListTile(
                         leading: CircleAvatar(
                           backgroundColor: Colors.blue.shade100,
-                          child: Text(os['numeroOS']?.toString().substring(0,2) ?? '#'),
+                          child: Text(
+                            numeroOS.length >= 2
+                                ? numeroOS.substring(0, 2)
+                                : numeroOS,
+                          ),
                         ),
-                        title: Text("${os['numeroOS']} - ${os['clienteNome']}", style: const TextStyle(fontWeight: FontWeight.bold)),
-                        subtitle: Text("Data: $dataFormatada | Itens: ${os['quantidadeTotal'] ?? 0}"),
+                        title: Text(
+                          '$numeroOS - ${os['clienteNome'] ?? 'Cliente N/D'}',
+                          style: const TextStyle(fontWeight: FontWeight.bold),
+                        ),
+                        subtitle: Text(
+                            'Data: $dataFormatada | Itens: ${os['quantidadeTotal'] ?? 0}'),
                         trailing: Chip(
-                          label: Text(status.toString().replaceAll('_', ' ').toUpperCase(), style: const TextStyle(fontSize: 10, color: Colors.white)),
+                          label: Text(
+                            status
+                                .replaceAll('_', ' ')
+                                .toUpperCase(),
+                            style: const TextStyle(
+                                fontSize: 10, color: Colors.white),
+                          ),
                           backgroundColor: Colors.blueGrey,
                         ),
-                        onTap: () {
-                          Navigator.push(context, MaterialPageRoute(builder: (_) => TelaDetalhesOS(osId: osId)));
-                        },
+                        onTap: () => Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                              builder: (_) =>
+                                  TelaDetalhesOS(osId: osId)),
+                        ),
                       ),
                     );
                   },
@@ -145,8 +189,11 @@ class _TelaListaOSState extends State<TelaListaOS> {
       ),
       floatingActionButton: FloatingActionButton(
         backgroundColor: Colors.red.shade900,
+        onPressed: () => Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => const TelaCriarOS()),
+        ),
         child: const Icon(Icons.add, color: Colors.white),
-        onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (context) => const TelaCriarOS())),
       ),
     );
   }

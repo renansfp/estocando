@@ -6,29 +6,21 @@ import 'package:protecin_producao/telas/estoque/tela_requisicoes_pendentes.dart'
 import 'package:flutter/material.dart';
 import 'package:protecin_producao/telas/estoque/tela_lista_produtos.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
-
+import 'package:protecin_producao/provider/produto_provider.dart';
 import 'package:protecin_producao/telas/producao/tela_lista_os.dart';
-
 // Import Tela de Controle de Pó (Nova)
 import 'package:protecin_producao/telas/estoque/tela_controle_lotes.dart';
-
 // Imports Admin/Estoque
 import 'package:protecin_producao/telas/admin/tela_aprovacao_usuarios.dart';
 import 'package:protecin_producao/telas/estoque/tela_extrato_movimentacoes.dart';
-import 'package:protecin_producao/telas/admin/tela_importacao_parceiros.dart';
-import 'package:protecin_producao/telas/estoque/tela_importacao_produtos.dart';
 import 'package:protecin_producao/telas/admin/tela_parceiros.dart';
 import 'package:protecin_producao/telas/estoque/tela_historico.dart';
-import 'package:protecin_producao/telas/estoque/tela_gerenciar_movimentacoes.dart';
 import 'package:protecin_producao/telas/estoque/tela_cadastro_produto.dart';
 import 'package:protecin_producao/telas/estoque/tela_movimentacao.dart';
 import 'package:protecin_producao/telas/admin/tela_cadastro_parceiro.dart';
-
 // Imports Produção (Fluxo Completo)
 import 'package:protecin_producao/telas/producao/estacao/tela_estacao_descarga.dart';
 import 'package:protecin_producao/telas/producao/tela_criar_os.dart';
-import 'package:protecin_producao/telas/producao/estacao/tela_estacao_limpeza.dart';
 import 'package:protecin_producao/telas/producao/estacao/tela_lista_lotes_limpeza.dart';
 import 'package:protecin_producao/telas/producao/estacao/tela_lista_lotes_lixa.dart';
 import 'package:protecin_producao/telas/producao/estacao/tela_lista_lotes_pintura.dart';
@@ -41,18 +33,17 @@ import 'package:protecin_producao/telas/producao/estacao/tela_lista_lotes_estanq
 import 'package:protecin_producao/telas/producao/estacao/tela_lista_lotes_premontagem.dart';
 import 'package:protecin_producao/telas/producao/estacao/tela_lista_lotes_montagem.dart';
 import 'package:protecin_producao/telas/producao/estacao/tela_lista_lotes_expedicao.dart';
-
 // Import Gerenciar Extintores
 import 'package:protecin_producao/telas/producao/tela_consulta_equipamentos.dart';
-
 // --- IMPORTS PARA A IMPRESSORA (WINDOWS) ---
 import 'package:protecin_producao/telas/windows/tela_servidor_impressao.dart'; // Tela Manual
 // OBS: Verifique se o arquivo do Monitor está nessa pasta 'services' ou ajuste aqui:
 import 'package:protecin_producao/services/monitor_impressao_windows.dart';
 import 'package:protecin_producao/provider/usuario_provider.dart';
 import 'package:provider/provider.dart';
+import 'package:protecin_producao/provider/item_os_provider.dart';
+import 'package:protecin_producao/repositories/requisicao_repository.dart';
 // -------------------------------------------
-
 import 'dart:io';
 import 'package:flutter/foundation.dart'; // Para kIsWeb
 import 'package:universal_html/html.dart' as html;
@@ -74,46 +65,17 @@ class _HomeScreenState extends State<HomeScreen> {
   // Variável para manter o Monitor vivo em memória
   MonitorImpressaoWindows? _monitorWindows;
 
-  // Contadores Dashboard
-  int _aguardandoDescarga = 0;
-  int _aguardandoLimpeza = 0;
-  int _aguardandoLixa = 0;
-  int _aguardandoManutencao = 0;
-  int _aguardandoSaque = 0;
-  int _aguardandoPintura = 0;
-  int _aguardandoRecarga = 0;
-  int _aguardandoEstanqueidade = 0;
-  int _aguardandoPremontagem = 0;
-  int _aguardandoMontagem = 0;
-  int _aguardandoValvulaPo = 0;
-  int _aguardandoExpedicao = 0;
-  int _aguardandoTeste = 0;
-  int _descargaABC = 0;
-  int _descargaBC = 0;
-  int _descargaAgua = 0;
-  int _descargaCO2 = 0;
-
-  // Contadores por agente — Recarga
-  int _recargaABC = 0;
-  int _recargaBC = 0;
-  int _recargaAgua = 0;
-  int _recargaCO2 = 0;
-
-  // Contadores por agente — Estanqueidade
-  int _estanqueABC = 0;
-  int _estanqueBC = 0;
-  int _estanqueAgua = 0;
-  int _estanqueCO2 = 0;
-
   final Color _corPrincipal = const Color(0xFF1565C0);
 
   @override
   void initState() {
     super.initState();
-    _iniciarOuvinteDashboard();
+    // Inicia a escuta do dashboard pelo provider
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final usuario = context.read<UsuarioProvider>().usuario;
+      context.read<ItemOsProvider>().iniciarEscuta(usuario?.empresaId ?? '');
+    });
 
-    // --- AUTO-START DO MONITOR (SÓ NO WINDOWS) ---
-    // Isso liga a impressora silenciosamente assim que o usuário entra na Home
     if (!kIsWeb && Platform.isWindows) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         _iniciarMonitorEmSegundoPlano();
@@ -153,7 +115,7 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
       );
     } catch (e) {
-      print("Erro ao iniciar monitor background: $e");
+      debugPrint("Erro ao iniciar monitor background: $e");
     }
   }
 
@@ -165,122 +127,6 @@ class _HomeScreenState extends State<HomeScreen> {
     super.dispose();
   }
 
-  void _iniciarOuvinteDashboard() {
-    FirebaseFirestore.instance
-        .collection('itens_os')
-        .where('statusAtual', isEqualTo: 'emProducao')
-        .snapshots()
-        .listen((snapshot) {
-      int desc = 0,
-          limp = 0,
-          lixa = 0,
-          manut = 0,
-          saque = 0,
-          pint = 0;
-      int rec = 0,
-          estanque = 0,
-          premont = 0,
-          mont = 0,
-          test = 0,
-          valvulaPo = 0,
-          expedicao = 0;
-
-      // Contadores temporários para o modal
-      int dABC = 0,
-          dBC = 0,
-          dAgua = 0,
-          dCO2 = 0;
-      int rABC = 0,
-          rBC = 0,
-          rAgua = 0,
-          rCO2 = 0;
-      int eABC = 0,
-          eBC = 0,
-          eAgua = 0,
-          eCO2 = 0;
-
-      for (var doc in snapshot.docs) {
-        final data = doc.data();
-        final statusRaw = data['status']?.toString().toLowerCase().replaceAll(
-            '_', '') ?? '';
-
-        // CORREÇÃO: Extraindo o tipo de agente para a contagem
-        final String agente = data['tipoAgente']?.toString().toUpperCase() ??
-            '';
-
-        if (statusRaw == 'aguardandodescarga') {
-          desc++;
-          if (agente == 'ABC')
-            dABC++;
-          else if (agente == 'BC' || agente == 'PQS')
-            dBC++;
-          else if (agente == 'CO2')
-            dCO2++;
-          else if (['AP', 'ESP', 'AGUA'].contains(agente)) dAgua++;
-        }
-
-        if (statusRaw == 'aguardandolimpeza') limp++;
-        if (statusRaw == 'aguardandolixa') lixa++;
-        if (statusRaw == 'aguardandomanutencaovalvula') manut++;
-        if (statusRaw == 'aguardandosaquevalvula') saque++;
-        if (statusRaw == 'aguardandopintura') pint++;
-        if (statusRaw.contains('aguardandorecarga')) {
-          rec++;
-          // Usa o campo tipoAgente diretamente — evita colisão entre 'abc' e 'bc' no status
-          if (agente == 'ABC') rABC++;
-          else if (agente == 'BC' || agente == 'PQS') rBC++;
-          else if (['AP', 'ESP', 'AGUA'].contains(agente)) rAgua++;
-          else if (agente == 'CO2') rCO2++;
-        }
-        if (statusRaw.contains('aguardandoestanqueidade')) {
-          estanque++;
-          if (agente == 'ABC') eABC++;
-          else if (agente == 'BC' || agente == 'PQS') eBC++;
-          else if (['AP', 'ESP', 'AGUA'].contains(agente)) eAgua++;
-          else if (agente == 'CO2') eCO2++;
-        }
-        if (statusRaw == 'aguardandopremontagem') premont++;
-        if (statusRaw == 'aguardandomontagem') mont++;
-        if (statusRaw == 'aguardandoth') test++;
-        if (statusRaw == 'aguardandomanutencaovalvulapo') valvulaPo++;
-        if (statusRaw == 'aguardandoexpedicao') expedicao++;
-      }
-
-      if (mounted) {
-        setState(() {
-          _aguardandoDescarga = desc;
-          _aguardandoLimpeza = limp;
-          _aguardandoLixa = lixa;
-          _aguardandoManutencao = manut;
-          _aguardandoSaque = saque;
-          _aguardandoPintura = pint;
-          _aguardandoRecarga = rec;
-          _aguardandoEstanqueidade = estanque;
-          _aguardandoPremontagem = premont;
-          _aguardandoMontagem = mont;
-          _aguardandoValvulaPo = valvulaPo;
-          _aguardandoExpedicao = expedicao;
-          _aguardandoTeste = test;
-
-          // Atualizando os balõezinhos
-          _descargaABC = dABC;
-          _descargaBC = dBC;
-          _descargaAgua = dAgua;
-          _descargaCO2 = dCO2;
-
-          _recargaABC = rABC;
-          _recargaBC = rBC;
-          _recargaAgua = rAgua;
-          _recargaCO2 = rCO2;
-
-          _estanqueABC = eABC;
-          _estanqueBC = eBC;
-          _estanqueAgua = eAgua;
-          _estanqueCO2 = eCO2;
-        });
-      }
-    });
-  }
 
   // --- NAVEGAÇÃO ---
   void _irParaListaDeProdutos(String? termoBuscado) {
@@ -318,12 +164,9 @@ class _HomeScreenState extends State<HomeScreen> {
       if (usuario == null) return;
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
           content: Text('Gerando relatório...'), backgroundColor: Colors.blue));
-      final querySnapshot = await FirebaseFirestore.instance
-          .collection(
-          'produtos')
-          .where('empresaId', isEqualTo: usuario?.empresaId ?? '')
-          .orderBy('nome')
-          .get();
+      final produtos = await context
+          .read<ProdutoProvider>()
+          .buscarTodosPorEmpresa(usuario.empresaId);
       var excel = Excel.createExcel();
       Sheet sheetObject = excel['Produtos'];
       List<String> headers = [
@@ -338,8 +181,7 @@ class _HomeScreenState extends State<HomeScreen> {
       ];
       sheetObject.appendRow(
           headers.map((header) => TextCellValue(header)).toList());
-      for (var doc in querySnapshot.docs) {
-        final data = doc.data();
+      for (var data in produtos) {
         sheetObject.appendRow([
           TextCellValue(data['codigo'] ?? ''),
           TextCellValue(data['nome'] ?? ''),
@@ -388,6 +230,7 @@ class _HomeScreenState extends State<HomeScreen> {
     final bool isAdmin = permissao == 'admin';
     final bool isAlmoxarife = permissao == 'almoxarife';
     final bool isProducao = permissao == 'producao';
+    final contadores = context.watch<ItemOsProvider>().contadores;
 
     return Scaffold(
       appBar: AppBar(
@@ -435,25 +278,19 @@ class _HomeScreenState extends State<HomeScreen> {
               scrollDirection: Axis.horizontal,
               child: Row(
                 children: [
-                  _buildDashCard(
-                      'Descarga', _aguardandoDescarga, Colors.orange),
-                  _buildDashCard('Limpeza', _aguardandoLimpeza, Colors.blue),
-                  _buildDashCard('Lixa', _aguardandoLixa, Colors.blueGrey),
-                  _buildDashCard(
-                      'Manut. Válv', _aguardandoManutencao, Colors.teal),
-                  _buildDashCard('Saque Válv.', _aguardandoSaque, Colors.red),
-                  _buildDashCard('T. Hidro', _aguardandoTeste, Colors.purple),
-                  _buildDashCard('Pintura', _aguardandoPintura, Colors.brown),
-                  _buildDashCard('Válv. Pó', _aguardandoValvulaPo, Colors.deepOrange),
-                  _buildDashCard('Recarga', _aguardandoRecarga, Colors.green),
-                  _buildDashCard(
-                      'Estanq.', _aguardandoEstanqueidade, Colors.lightBlue),
-                  _buildDashCard(
-                      'Pré-Mont.', _aguardandoPremontagem, Colors.indigo),
-                  _buildDashCard(
-                      'Montagem', _aguardandoMontagem, Colors.deepPurple),
-                  _buildDashCard(
-                      'Expedição', _aguardandoExpedicao, Colors.black87),
+                  _buildDashCard('Descarga', contadores['descarga'] ?? 0, Colors.orange),
+                  _buildDashCard('Limpeza', contadores['limpeza'] ?? 0, Colors.blue),
+                  _buildDashCard('Lixa', contadores['lixa'] ?? 0, Colors.blueGrey),
+                  _buildDashCard('Manut. Válv', contadores['manutencao'] ?? 0, Colors.teal),
+                  _buildDashCard('Saque Válv.', contadores['saque'] ?? 0, Colors.red),
+                  _buildDashCard('T. Hidro', contadores['teste'] ?? 0, Colors.purple),
+                  _buildDashCard('Pintura', contadores['pintura'] ?? 0, Colors.brown),
+                  _buildDashCard('Válv. Pó', contadores['valvulaPo'] ?? 0, Colors.deepOrange),
+                  _buildDashCard('Recarga', contadores['recarga'] ?? 0, Colors.green),
+                  _buildDashCard('Estanq.', contadores['estanqueidade'] ?? 0, Colors.lightBlue),
+                  _buildDashCard('Pré-Mont.', contadores['premontagem'] ?? 0, Colors.indigo),
+                  _buildDashCard('Montagem', contadores['montagem'] ?? 0, Colors.deepPurple),
+                  _buildDashCard('Expedição', contadores['expedicao'] ?? 0, Colors.black87),
                 ],
               ),
             ),
@@ -473,14 +310,14 @@ class _HomeScreenState extends State<HomeScreen> {
                   icon: Icons.download,
                   label: 'Descarga',
                   color: Colors.orange[800]!,
-                  count: _aguardandoDescarga,
-                  onTap: () => _mostrarOpcoesDescarga(context),
+                  count: contadores['descarga'] ?? 0,
+                  onTap: () => _mostrarOpcoesDescarga(context, contadores),
                 ),
                 _buildSquareButton(
                   icon: Icons.cleaning_services,
                   label: 'Limpeza',
                   color: Colors.blue[800]!,
-                  count: _aguardandoLimpeza,
+                  count: contadores['limpeza'] ?? 0,
                   onTap: () =>
                       Navigator.push(context, MaterialPageRoute(
                           builder: (_) => const TelaListaLotesLimpeza())),
@@ -489,7 +326,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   icon: Icons.build,
                   label: 'Lixa',
                   color: Colors.blueGrey[700]!,
-                  count: _aguardandoLixa,
+                  count: contadores['lixa'] ?? 0,
                   onTap: () =>
                       Navigator.push(context, MaterialPageRoute(
                           builder: (_) => const TelaListaLotesLixa())),
@@ -498,7 +335,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   icon: Icons.handyman,
                   label: 'Manut. Válv',
                   color: Colors.teal[700]!,
-                  count: _aguardandoManutencao,
+                  count: contadores['manutencao'] ?? 0,
                   onTap: () =>
                       Navigator.push(context, MaterialPageRoute(
                           builder: (_) => const TelaListaLotesManutencao())),
@@ -507,7 +344,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   icon: Icons.settings_backup_restore,
                   label: 'Saque Válv.',
                   color: Colors.red[700]!,
-                  count: _aguardandoSaque,
+                  count: contadores['saque'] ?? 0,
                   onTap: () =>
                       Navigator.push(context, MaterialPageRoute(
                           builder: (_) => const TelaListaLotesSaque())),
@@ -516,7 +353,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   icon: Icons.science,
                   label: 'T. Hidro',
                   color: Colors.purple[700]!,
-                  count: _aguardandoTeste,
+                  count: contadores['teste'] ?? 0,
                   onTap: () =>
                       Navigator.push(context, MaterialPageRoute(
                           builder: (_) => const TelaListaLotesTH())),
@@ -525,7 +362,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   icon: Icons.format_paint,
                   label: 'Pintura',
                   color: Colors.brown[700]!,
-                  count: _aguardandoPintura,
+                  count: contadores['pintura'] ?? 0,
                   onTap: () =>
                       Navigator.push(context, MaterialPageRoute(
                           builder: (_) => const TelaListaLotesPintura())),
@@ -534,7 +371,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   icon: Icons.handyman,
                   label: 'Válv. Pó',
                   color: Colors.deepOrange[700]!,
-                  count: _aguardandoValvulaPo,
+                  count: contadores['valvulaPo'] ?? 0,
                   onTap: () =>
                       Navigator.push(context, MaterialPageRoute(
                           builder: (_) => const TelaListaLotesValvulaPo())),
@@ -543,21 +380,21 @@ class _HomeScreenState extends State<HomeScreen> {
                   icon: Icons.compress,
                   label: 'Recarga',
                   color: Colors.green[700]!,
-                  count: _aguardandoRecarga,
-                  onTap: () => _mostrarOpcoesRecarga(context),
+                  count: contadores['recarga'] ?? 0,
+                  onTap: () => _mostrarOpcoesRecarga(context, contadores),
                 ),
                 _buildSquareButton(
                   icon: Icons.water,
                   label: 'Estanq.',
                   color: Colors.lightBlue[800]!,
-                  count: _aguardandoEstanqueidade,
-                  onTap: () => _mostrarOpcoesEstanqueidade(context),
+                  count: contadores['estanqueidade'] ?? 0,
+                  onTap: () => _mostrarOpcoesEstanqueidade(context, contadores),
                 ),
                 _buildSquareButton(
                   icon: Icons.group_work,
                   label: 'Pré-Mont.',
                   color: Colors.indigo[700]!,
-                  count: _aguardandoPremontagem,
+                  count: contadores['premontagem'] ?? 0,
                   onTap: () =>
                       Navigator.push(context, MaterialPageRoute(
                           builder: (_) => const TelaListaLotesPremontagem())),
@@ -566,7 +403,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   icon: Icons.verified,
                   label: 'Montagem',
                   color: Colors.deepPurple[700]!,
-                  count: _aguardandoMontagem,
+                  count: contadores['montagem'] ?? 0,
                   onTap: () =>
                       Navigator.push(context, MaterialPageRoute(
                           builder: (_) => const TelaListaLotesMontagem())),
@@ -575,7 +412,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   icon: Icons.local_shipping,
                   label: 'Expedição',
                   color: Colors.black87,
-                  count: _aguardandoExpedicao,
+                  count: contadores['expedicao'] ?? 0,
                   onTap: () =>
                       Navigator.push(context, MaterialPageRoute(
                           builder: (_) => const TelaListaLotesExpedicao())),
@@ -605,16 +442,12 @@ class _HomeScreenState extends State<HomeScreen> {
 
             if (isAdmin || isAlmoxarife) ...[
               const SizedBox(height: 5),
-              StreamBuilder<QuerySnapshot>(
-                stream: FirebaseFirestore.instance
-                    .collection('requisicoes')
-                    .where('empresaId', isEqualTo: usuario?.empresaId ?? '')
-                    .where('status', isEqualTo: 'PENDENTE')
-                    .limit(1)
-                    .snapshots(),
+              StreamBuilder<bool>(
+                stream: context
+                    .read<RequisicaoRepository>()
+                    .streamTemPendentes(usuario?.empresaId ?? ''),
                 builder: (context, snapshot) {
-                  final bool temPendentes = (snapshot.hasData &&
-                      snapshot.data!.docs.isNotEmpty);
+                  final bool temPendentes = snapshot.data ?? false;
                   return _buildBotaoAcessoRapido(
                     icone: Icons.pending_actions,
                     titulo: 'Requisições',
@@ -671,7 +504,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   // --- MÉTODOS AUXILIARES (IGUAIS AO ANTERIOR) ---
-  void _mostrarOpcoesDescarga(BuildContext context) {
+  void _mostrarOpcoesDescarga(BuildContext context, Map<String, int> contadores) {
     showModalBottomSheet(
       context: context,
       builder: (context) {
@@ -687,9 +520,7 @@ class _HomeScreenState extends State<HomeScreen> {
               ListTile(
                 leading: const Icon(Icons.ac_unit, color: Colors.brown),
                 title: const Text("Pó Químico (PQS ABC)"),
-                trailing: _descargaABC > 0
-                    ? Badge(label: Text('$_descargaABC'))
-                    : null,
+                trailing: (contadores['descargaABC'] ?? 0) > 0 ? Badge(label: Text('${contadores['descargaABC']}')) : null,
                 onTap: () {
                   Navigator.pop(context);
                   Navigator.push(context, MaterialPageRoute(builder: (_) =>
@@ -700,9 +531,7 @@ class _HomeScreenState extends State<HomeScreen> {
               ListTile(
                 leading: const Icon(Icons.ac_unit, color: Colors.grey),
                 title: const Text("Pó Químico (PQS BC)"),
-                trailing: _descargaBC > 0
-                    ? Badge(label: Text('$_descargaBC'))
-                    : null,
+                trailing: (contadores['descargaBC'] ?? 0) > 0 ? Badge(label: Text('${contadores['descargaBC']}')) : null,
                 onTap: () {
                   Navigator.pop(context);
                   Navigator.push(context, MaterialPageRoute(builder: (_) =>
@@ -713,8 +542,7 @@ class _HomeScreenState extends State<HomeScreen> {
               ListTile(
                 leading: const Icon(Icons.water_drop, color: Colors.blue),
                 title: const Text("Água / Espuma"),
-                trailing: _descargaAgua > 0 ? Badge(
-                    label: Text('$_descargaAgua')) : null,
+                trailing: (contadores['descargaAgua'] ?? 0) > 0 ? Badge(label: Text('${contadores['descargaAgua']}')) : null,
                 onTap: () {
                   Navigator.pop(context);
                   Navigator.push(context, MaterialPageRoute(builder: (_) =>
@@ -726,9 +554,7 @@ class _HomeScreenState extends State<HomeScreen> {
               ListTile(
                 leading: const Icon(Icons.air, color: Colors.black),
                 title: const Text("CO2"),
-                trailing: _descargaCO2 > 0
-                    ? Badge(label: Text('$_descargaCO2'))
-                    : null,
+                trailing: (contadores['descargaCO2'] ?? 0) > 0 ? Badge(label: Text('${contadores['descargaCO2']}')) : null,
                 onTap: () {
                   Navigator.pop(context);
                   Navigator.push(context, MaterialPageRoute(builder: (_) =>
@@ -743,7 +569,7 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  void _mostrarOpcoesRecarga(BuildContext context) {
+  void _mostrarOpcoesRecarga(BuildContext context, Map<String, int> contadores) {
     showModalBottomSheet(
       context: context,
       builder: (context) {
@@ -759,7 +585,7 @@ class _HomeScreenState extends State<HomeScreen> {
               ListTile(
                 leading: const Icon(Icons.ac_unit, color: Colors.brown),
                 title: const Text("Pó Químico (PQS ABC)"),
-                trailing: _recargaABC > 0 ? Badge(label: Text('$_recargaABC')) : null,
+                trailing: (contadores['recargaABC'] ?? 0) > 0 ? Badge(label: Text('${contadores['recargaABC']}')) : null,
                 onTap: () {
                   Navigator.pop(context);
                   Navigator.push(context, MaterialPageRoute(builder: (_) =>
@@ -772,7 +598,7 @@ class _HomeScreenState extends State<HomeScreen> {
               ListTile(
                 leading: const Icon(Icons.ac_unit, color: Colors.grey),
                 title: const Text("Pó Químico (PQS BC)"),
-                trailing: _recargaBC > 0 ? Badge(label: Text('$_recargaBC')) : null,
+                trailing: (contadores['recargaBC'] ?? 0) > 0 ? Badge(label: Text('${contadores['recargaBC']}')) : null,
                 onTap: () {
                   Navigator.pop(context);
                   Navigator.push(context, MaterialPageRoute(builder: (_) =>
@@ -785,7 +611,7 @@ class _HomeScreenState extends State<HomeScreen> {
               ListTile(
                 leading: const Icon(Icons.water_drop, color: Colors.blue),
                 title: const Text("Água / Espuma"),
-                trailing: _recargaAgua > 0 ? Badge(label: Text('$_recargaAgua')) : null,
+                trailing: (contadores['recargaAgua'] ?? 0) > 0 ? Badge(label: Text('${contadores['recargaAgua']}')) : null,
                 onTap: () {
                   Navigator.pop(context);
                   Navigator.push(context, MaterialPageRoute(builder: (_) =>
@@ -798,7 +624,7 @@ class _HomeScreenState extends State<HomeScreen> {
               ListTile(
                 leading: const Icon(Icons.air, color: Colors.black),
                 title: const Text("CO2"),
-                trailing: _recargaCO2 > 0 ? Badge(label: Text('$_recargaCO2')) : null,
+                trailing: (contadores['recargaCO2'] ?? 0) > 0 ? Badge(label: Text('${contadores['recargaCO2']}')) : null,
                 onTap: () {
                   Navigator.pop(context);
                   Navigator.push(context, MaterialPageRoute(builder: (_) =>
@@ -815,7 +641,7 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  void _mostrarOpcoesEstanqueidade(BuildContext context) {
+  void _mostrarOpcoesEstanqueidade(BuildContext context, Map<String, int> contadores) {
     showModalBottomSheet(
       context: context,
       builder: (context) {
@@ -831,7 +657,7 @@ class _HomeScreenState extends State<HomeScreen> {
               ListTile(
                 leading: const Icon(Icons.ac_unit, color: Colors.brown),
                 title: const Text("Pó Químico (PQS ABC)"),
-                trailing: _estanqueABC > 0 ? Badge(label: Text('$_estanqueABC')) : null,
+                trailing: (contadores['estanqueABC'] ?? 0) > 0 ? Badge(label: Text('${contadores['estanqueABC']}')) : null,
                 onTap: () {
                   Navigator.pop(context);
                   Navigator.push(context, MaterialPageRoute(builder: (_) =>
@@ -844,7 +670,7 @@ class _HomeScreenState extends State<HomeScreen> {
               ListTile(
                 leading: const Icon(Icons.ac_unit, color: Colors.grey),
                 title: const Text("Pó Químico (PQS BC)"),
-                trailing: _estanqueBC > 0 ? Badge(label: Text('$_estanqueBC')) : null,
+                trailing: (contadores['estanqueBC'] ?? 0) > 0 ? Badge(label: Text('${contadores['estanqueBC']}')) : null,
                 onTap: () {
                   Navigator.pop(context);
                   Navigator.push(context, MaterialPageRoute(builder: (_) =>
@@ -857,7 +683,7 @@ class _HomeScreenState extends State<HomeScreen> {
               ListTile(
                 leading: const Icon(Icons.water_drop, color: Colors.blue),
                 title: const Text("Água / Espuma"),
-                trailing: _estanqueAgua > 0 ? Badge(label: Text('$_estanqueAgua')) : null,
+                trailing: (contadores['estanqueAgua'] ?? 0) > 0 ? Badge(label: Text('${contadores['estanqueAgua']}')) : null,
                 onTap: () {
                   Navigator.pop(context);
                   Navigator.push(context, MaterialPageRoute(builder: (_) =>
@@ -870,7 +696,7 @@ class _HomeScreenState extends State<HomeScreen> {
               ListTile(
                 leading: const Icon(Icons.air, color: Colors.black),
                 title: const Text("CO2"),
-                trailing: _estanqueCO2 > 0 ? Badge(label: Text('$_estanqueCO2')) : null,
+                trailing: (contadores['estanqueCO2'] ?? 0) > 0 ? Badge(label: Text('${contadores['estanqueCO2']}')) : null,
                 onTap: () {
                   Navigator.pop(context);
                   Navigator.push(context, MaterialPageRoute(builder: (_) =>

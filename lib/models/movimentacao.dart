@@ -29,10 +29,18 @@ class Movimentacao {
   final String? nomeColaborador;
   final String? centroDeCusto;
 
-  // ---> 1. CAMPO NOVO ADICIONADO AQUI <---
   final String? numeroPedido;
 
   final String empresaId;
+
+  // ─── Auditoria: quem lançou ───────────────────────────────────────────────
+  final String? usuarioId;
+  final String? usuarioNome;
+
+  // ─── Cancelamento: rastro de estorno ─────────────────────────────────────
+  final bool cancelada;
+  final String? canceladaPor;
+  final DateTime? canceladaEm;
 
   Movimentacao({
     required this.produtoId,
@@ -52,8 +60,13 @@ class Movimentacao {
     this.numeroAG,
     this.nomeColaborador,
     this.centroDeCusto,
-    this.numeroPedido, // ---> 2. CAMPO NOVO ADICIONADO AO CONSTRUTOR <---
+    this.numeroPedido,
     required this.empresaId,
+    this.usuarioId,
+    this.usuarioNome,
+    this.cancelada = false,
+    this.canceladaPor,
+    this.canceladaEm,
   });
 
   Map<String, dynamic> toJson() => {
@@ -74,8 +87,13 @@ class Movimentacao {
     'numeroAG': numeroAG,
     'nomeColaborador': nomeColaborador,
     'centroDeCusto': centroDeCusto,
-    'numeroPedido': numeroPedido, // ---> 3. CAMPO NOVO ADICIONADO AO JSON <---
+    'numeroPedido': numeroPedido,
     'empresaId': empresaId,
+    'usuarioId': usuarioId,
+    'usuarioNome': usuarioNome,
+    'cancelada': cancelada,
+    'canceladaPor': canceladaPor,
+    'canceladaEm': canceladaEm != null ? Timestamp.fromDate(canceladaEm!) : null,
   };
 
   factory Movimentacao.fromJson(Map<String, dynamic> json) {
@@ -98,8 +116,15 @@ class Movimentacao {
       numeroAG: json['numeroAG'],
       nomeColaborador: json['nomeColaborador'],
       centroDeCusto: json['centroDeCusto'],
-      numeroPedido: json['numeroPedido'], // ---> 4. CAMPO NOVO ADICIONADO AO FROMJSON <---
+      numeroPedido: json['numeroPedido'],
       empresaId: json['empresaId'] ?? '',
+      usuarioId: json['usuarioId'],
+      usuarioNome: json['usuarioNome'],
+      cancelada: json['cancelada'] as bool? ?? false,
+      canceladaPor: json['canceladaPor'],
+      canceladaEm: json['canceladaEm'] != null
+          ? (json['canceladaEm'] as Timestamp).toDate()
+          : null,
     );
   }
 }

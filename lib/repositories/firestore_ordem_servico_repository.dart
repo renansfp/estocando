@@ -77,10 +77,66 @@ class FirestoreOrdemServicoRepository implements OrdemServicoRepository {
         .where('empresaId', isEqualTo: empresaId)
         .snapshots()
         .map((snap) => snap.docs
-        .map((doc) => OrdemServico.fromJson(
-      doc.data(),
-      doc.id,
-    ))
+        .map((doc) => OrdemServico.fromJson(doc.data(), doc.id))
         .toList());
+  }
+
+  @override
+  Stream<List<Map<String, dynamic>>> streamTodasOrdenadas() {
+    return _db
+        .collection('ordens_servico')
+        .orderBy('dataEntrada', descending: false)
+        .snapshots()
+        .map((snap) =>
+        snap.docs.map((doc) => {'id': doc.id, ...doc.data()}).toList());
+  }
+
+  // ─── Novo método ─────────────────────────────────────────────────────────
+
+  @override
+  Future<Map<String, dynamic>?> buscarPorNumero(
+      String empresaId, String numeroOS) async {
+    // Tenta com o número exato primeiro
+    var query = await _db
+        .collection('ordens_servico')
+        .where('empresaId', isEqualTo: empresaId)
+        .where('numeroOS', isEqualTo: numeroOS)
+        .limit(1)
+        .get();
+
+    // Se não encontrou e o número é curto, tenta com zero-padding (ex: "105" → "00105")
+    if (query.docs.isEmpty && numeroOS.length < 5) {
+      query = await _db
+          .collection('ordens_servico')
+          .where('empresaId', isEqualTo: empresaId)
+          .where('numeroOS', isEqualTo: numeroOS.padLeft(5, '0'))
+          .limit(1)
+          .get();
+    }
+
+    if (query.docs.isEmpty) return null;
+
+    final doc = query.docs.first;
+    return {'id': doc.id, ...doc.data()};
+  }
+
+  @override
+  Stream<Map<String, dynamic>?> streamPorId(String osId) {
+    return _db
+        .collection('ordens_servico')
+        .doc(osId)
+        .snapshots()
+        .map((doc) {
+      if (!doc.exists) return null;
+      return <String, dynamic>{'id': doc.id, ...doc.data()!};
+    });
+  }
+
+
+  @override
+  Future<OrdemServico?> buscarPorId(String osId) async {
+    final doc = await _db.collection('ordens_servico').doc(osId).get();
+    if (!doc.exists) return null;
+    return OrdemServico.fromJson(doc.data() as Map<String, dynamic>, doc.id);
   }
 }

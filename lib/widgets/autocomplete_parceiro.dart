@@ -1,7 +1,10 @@
-// Arquivo: lib/widgets/autocomplete_parceiro.dart (VERSÃO CORRIGIDA)
+// lib/widgets/autocomplete_parceiro.dart
+// Migrado para Repository Pattern — sem acesso direto ao Firestore.
+
 import 'package:flutter/material.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:provider/provider.dart';
 import 'package:protecin_producao/models/parceiro.dart';
+import 'package:protecin_producao/provider/parceiro_provider.dart';
 
 class AutocompleteParceiroWidget extends StatefulWidget {
   final String empresaId;
@@ -24,11 +27,9 @@ class AutocompleteParceiroWidget extends StatefulWidget {
 
 class _AutocompleteParceiroWidgetState
     extends State<AutocompleteParceiroWidget> {
-  // <<< MUDANÇA 1: Criamos os dois (controller e focus node)
   final TextEditingController _controller = TextEditingController();
   final FocusNode _focusNode = FocusNode();
 
-  // <<< MUDANÇA 3: Adicionamos o dispose para os dois
   @override
   void dispose() {
     _controller.dispose();
@@ -36,24 +37,17 @@ class _AutocompleteParceiroWidgetState
     super.dispose();
   }
 
-  Future<Iterable<Parceiro>> _buscarParceiros(String text) async {
-    // ... (Esta função continua a mesma) ...
-    if (text.isEmpty) {
-      return const Iterable.empty();
-    }
+  Future<Iterable<Parceiro>> _buscarParceiros(String termo) async {
+    if (termo.isEmpty) return const Iterable.empty();
     try {
-      final querySnapshot = await FirebaseFirestore.instance
-          .collection('parceiros')
-          .where('empresaId', isEqualTo: widget.empresaId)
-          .where('tipo', isEqualTo: widget.tipoParceiro.name)
-          .where('nome', isGreaterThanOrEqualTo: text.toUpperCase())
-          .where('nome', isLessThanOrEqualTo: '${text.toUpperCase()}\uf8ff')
-          .limit(10)
-          .get();
-      return querySnapshot.docs.map((doc) =>
-          Parceiro.fromJson(doc.data() as Map<String, dynamic>, doc.id));
+      final maps = await context.read<ParceiroProvider>().buscarPorNome(
+        empresaId: widget.empresaId,
+        tipoParceiro: widget.tipoParceiro.name,
+        termo: termo,
+      );
+      return maps.map((m) => Parceiro.fromJson(m, m['id'] as String));
     } catch (e) {
-      print('Erro ao buscar parceiros: $e');
+      debugPrint('AutocompleteParceiroWidget erro: $e');
       return const Iterable.empty();
     }
   }
@@ -61,24 +55,16 @@ class _AutocompleteParceiroWidgetState
   @override
   Widget build(BuildContext context) {
     return RawAutocomplete<Parceiro>(
-      // <<< MUDANÇA 2: Passamos os dois, como manda a regra
       textEditingController: _controller,
       focusNode: _focusNode,
-
-      optionsBuilder: (TextEditingValue textEditingValue) {
-        return _buscarParceiros(textEditingValue.text);
-      },
+      optionsBuilder: (TextEditingValue textEditingValue) =>
+          _buscarParceiros(textEditingValue.text),
       displayStringForOption: (Parceiro option) => option.nome,
-      onSelected: (Parceiro selection) {
-        widget.onParceiroSelected(selection);
-      },
-
-      fieldViewBuilder: (BuildContext context,
-          TextEditingController textEditingController, // Este é o controller interno
-          FocusNode focusNode, // Este é o focus node interno
-          VoidCallback onFieldSubmitted) {
+      onSelected: (Parceiro selection) =>
+          widget.onParceiroSelected(selection),
+      fieldViewBuilder: (context, textEditingController, focusNode,
+          onFieldSubmitted) {
         return TextFormField(
-          // Usamos os que o RawAutocomplete nos passa
           controller: textEditingController,
           focusNode: focusNode,
           decoration: InputDecoration(
@@ -88,20 +74,14 @@ class _AutocompleteParceiroWidgetState
               icon: const Icon(Icons.clear),
               onPressed: () {
                 textEditingController.clear();
-                // Limpamos também a seleção na tela-pai (precisamos ajustar isso)
                 widget.onParceiroSelected(null);
               },
             ),
           ),
-          validator: (value) {
-            return null;
-          },
+          validator: (_) => null,
         );
       },
-      // ... (optionsViewBuilder continua o mesmo) ...
-      optionsViewBuilder: (BuildContext context,
-          AutocompleteOnSelected<Parceiro> onSelected,
-          Iterable<Parceiro> options) {
+      optionsViewBuilder: (context, onSelected, options) {
         return Align(
           alignment: Alignment.topLeft,
           child: Material(
@@ -112,12 +92,10 @@ class _AutocompleteParceiroWidgetState
                 padding: EdgeInsets.zero,
                 shrinkWrap: true,
                 itemCount: options.length,
-                itemBuilder: (BuildContext context, int index) {
+                itemBuilder: (context, index) {
                   final Parceiro option = options.elementAt(index);
                   return InkWell(
-                    onTap: () {
-                      onSelected(option);
-                    },
+                    onTap: () => onSelected(option),
                     child: ListTile(
                       title: Text(option.nome),
                       subtitle: Text('Código: ${option.codigo}'),

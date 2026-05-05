@@ -109,6 +109,11 @@ class MonitorImpressaoWindows {
     _ocupadoImprimindo = false;
   }
 
+
+  // Mantida como referência. Remover se confirmar que não será usada.
+  // FUNÇÃO DESATIVADA — não está sendo chamada em nenhum lugar.
+  // ─────────────────────────────────────────────────────────────────────
+  // ignore: unused_element
   Future<void> _imprimirEtiquetaUnica(DocumentSnapshot doc) async {
     final Map<String, dynamic> dadosDoc = doc.data() as Map<String, dynamic>;
 

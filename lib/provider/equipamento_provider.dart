@@ -66,6 +66,9 @@ class EquipamentoProvider with ChangeNotifier {
     _subscription = null;
   }
 
+  Future<Equipamento?> buscarPorId(String id) =>
+      _repository.buscarPorId(id);
+
   Future<bool> verificarDisponibilidade(String equipamentoId) {
     return _repository.verificarDisponibilidade(equipamentoId);
   }
@@ -95,4 +98,16 @@ class EquipamentoProvider with ChangeNotifier {
     _subscription?.cancel();
     super.dispose();
   }
+
+
+  Future<Equipamento?> buscarPorCodigo({
+    required String empresaId,
+    required String clienteId,
+    required String codigo,
+  }) =>
+      _repository.buscarPorCodigo(
+        empresaId: empresaId,
+        clienteId: clienteId,
+        codigo: codigo,
+      );
 }

@@ -1,14 +1,16 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:provider/provider.dart';
+import 'package:protecin_producao/provider/item_os_provider.dart';
 import 'dart:typed_data';
 
 class TelaExecucaoMontagem extends StatefulWidget {
-  final DocumentSnapshot itemDoc;
+  // Trocamos DocumentSnapshot por Map — sem dependência de Firestore aqui
+  final Map<String, dynamic> item;
   final String osId;
 
-  const TelaExecucaoMontagem({super.key, required this.itemDoc, required this.osId});
+  const TelaExecucaoMontagem({super.key, required this.item, required this.osId});
 
   @override
   State<TelaExecucaoMontagem> createState() => _TelaExecucaoMontagemState();
@@ -24,12 +26,12 @@ class _TelaExecucaoMontagemState extends State<TelaExecucaoMontagem> {
 
   final ImagePicker _picker = ImagePicker();
 
-  // ─── Tira a foto E já dispara o upload em background ──────────────────────
+  // ─── Tira a foto E já dispara o upload em background ───────────────────────
   Future<void> _tirarFoto() async {
     final XFile? photo = await _picker.pickImage(
       source: ImageSource.camera,
-      imageQuality: 55,   // Suficiente para legibilidade do selo
-      maxWidth: 1280,     // Limita resolução → arquivo menor → upload mais rápido
+      imageQuality: 55,
+      maxWidth: 1280,
       maxHeight: 1280,
     );
 
@@ -39,7 +41,7 @@ class _TelaExecucaoMontagemState extends State<TelaExecucaoMontagem> {
 
     setState(() {
       _bytesImagem = bytes;
-      _uploadFuture = null; // Cancela referência de foto anterior
+      _uploadFuture = null;
     });
 
     // Dispara o upload IMEDIATAMENTE, sem esperar o operador apertar Concluir
@@ -48,17 +50,17 @@ class _TelaExecucaoMontagemState extends State<TelaExecucaoMontagem> {
 
   // Upload real — roda em background enquanto o operador confere a foto
   Future<String> _iniciarUpload(Uint8List bytes) async {
-    final String idItem = widget.itemDoc.id;
+    final String itemId = widget.item['id'];
     final ref = FirebaseStorage.instance
         .ref()
-        .child('producao/selos/${widget.osId}/$idItem.jpg');
+        .child('producao/selos/${widget.osId}/$itemId.jpg');
 
     final task = ref.putData(bytes, SettableMetadata(contentType: 'image/jpeg'));
     final snapshot = await task;
     return snapshot.ref.getDownloadURL();
   }
 
-  // ─── Concluir — o upload já está feito (ou quase) ─────────────────────────
+  // ─── Concluir — o upload já está feito (ou quase) ──────────────────────────
   Future<void> _finalizarMontagem() async {
     if (_bytesImagem == null || _uploadFuture == null) {
       _notificar('É obrigatório tirar a foto do Selo Inmetro!', Colors.orange);
@@ -71,16 +73,19 @@ class _TelaExecucaoMontagemState extends State<TelaExecucaoMontagem> {
       // Aguarda a URL — se o upload já terminou, retorna instantaneamente
       final String urlFoto = await _uploadFuture!;
 
-      await FirebaseFirestore.instance
-          .collection('itens_os')
-          .doc(widget.itemDoc.id)
-          .update({
-        'status': 'aguardando_expedicao',
-        'montagem_final': {
-          'data'       : FieldValue.serverTimestamp(),
-          'fotoSeloUrl': urlFoto,
+      // Usa confirmarEtapa — sem Firestore direto
+      await context.read<ItemOsProvider>().confirmarEtapa(
+        itemId: widget.item['id'],
+        dadosItem: {
+          'montagem_final': {
+            'data': DateTime.now(),
+            'fotoSeloUrl': urlFoto,
+          },
         },
-      });
+        osId: widget.osId,
+        statusPendente: 'aguardando_montagem',
+        proximaEstacao: 'expedicao',
+      );
 
       if (mounted) {
         Navigator.pop(context);
@@ -91,16 +96,18 @@ class _TelaExecucaoMontagemState extends State<TelaExecucaoMontagem> {
       if (_bytesImagem != null) {
         try {
           final urlFoto = await _iniciarUpload(_bytesImagem!);
-          await FirebaseFirestore.instance
-              .collection('itens_os')
-              .doc(widget.itemDoc.id)
-              .update({
-            'status': 'aguardando_expedicao',
-            'montagem_final': {
-              'data'       : FieldValue.serverTimestamp(),
-              'fotoSeloUrl': urlFoto,
+          await context.read<ItemOsProvider>().confirmarEtapa(
+            itemId: widget.item['id'],
+            dadosItem: {
+              'montagem_final': {
+                'data': DateTime.now(),
+                'fotoSeloUrl': urlFoto,
+              },
             },
-          });
+            osId: widget.osId,
+            statusPendente: 'aguardando_montagem',
+            proximaEstacao: 'expedicao',
+          );
           if (mounted) {
             Navigator.pop(context);
             _notificar('Montagem finalizada!', Colors.green);
@@ -121,7 +128,8 @@ class _TelaExecucaoMontagemState extends State<TelaExecucaoMontagem> {
 
   @override
   Widget build(BuildContext context) {
-    final dados = widget.itemDoc.data() as Map<String, dynamic>;
+    // Acessa os dados direto do Map — sem .data() do Firestore
+    final dados = widget.item;
 
     return Scaffold(
       appBar: AppBar(
@@ -151,7 +159,6 @@ class _TelaExecucaoMontagemState extends State<TelaExecucaoMontagem> {
                     padding: const EdgeInsets.all(8.0),
                     child: Image.memory(_bytesImagem!, fit: BoxFit.contain),
                   ),
-                  // Indicador de upload em progresso
                   FutureBuilder<String>(
                     future: _uploadFuture,
                     builder: (context, snap) {
@@ -161,7 +168,8 @@ class _TelaExecucaoMontagemState extends State<TelaExecucaoMontagem> {
                           child: CircleAvatar(
                             backgroundColor: Colors.green,
                             radius: 14,
-                            child: Icon(Icons.cloud_done, color: Colors.white, size: 18),
+                            child: Icon(Icons.cloud_done,
+                                color: Colors.white, size: 18),
                           ),
                         );
                       }
@@ -193,9 +201,11 @@ class _TelaExecucaoMontagemState extends State<TelaExecucaoMontagem> {
                   height: 50,
                   child: OutlinedButton.icon(
                     icon: const Icon(Icons.camera_alt),
-                    label: Text(_bytesImagem == null ? 'TIRAR FOTO DO SELO' : 'REFAZER FOTO'),
+                    label: Text(
+                        _bytesImagem == null ? 'TIRAR FOTO DO SELO' : 'REFAZER FOTO'),
                     onPressed: _tirarFoto,
-                    style: OutlinedButton.styleFrom(foregroundColor: Colors.deepPurple),
+                    style: OutlinedButton.styleFrom(
+                        foregroundColor: Colors.deepPurple),
                   ),
                 ),
                 const SizedBox(height: 15),
@@ -203,7 +213,9 @@ class _TelaExecucaoMontagemState extends State<TelaExecucaoMontagem> {
                   width: double.infinity,
                   height: 60,
                   child: ElevatedButton(
-                    onPressed: (_carregando || _bytesImagem == null) ? null : _finalizarMontagem,
+                    onPressed: (_carregando || _bytesImagem == null)
+                        ? null
+                        : _finalizarMontagem,
                     style: ElevatedButton.styleFrom(
                         backgroundColor: Colors.green.shade700,
                         foregroundColor: Colors.white),
@@ -211,14 +223,19 @@ class _TelaExecucaoMontagemState extends State<TelaExecucaoMontagem> {
                         ? const Row(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        SizedBox(width: 22, height: 22,
-                            child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2)),
+                        SizedBox(
+                            width: 22,
+                            height: 22,
+                            child: CircularProgressIndicator(
+                                color: Colors.white, strokeWidth: 2)),
                         SizedBox(width: 14),
-                        Text('Salvando...', style: TextStyle(fontSize: 16)),
+                        Text('Salvando...',
+                            style: TextStyle(fontSize: 16)),
                       ],
                     )
                         : const Text('CONCLUIR E FINALIZAR ITEM',
-                        style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                        style: TextStyle(
+                            fontSize: 18, fontWeight: FontWeight.bold)),
                   ),
                 ),
               ],
@@ -235,14 +252,17 @@ class _TelaExecucaoMontagemState extends State<TelaExecucaoMontagem> {
       padding: const EdgeInsets.all(15),
       decoration: BoxDecoration(
         color: Colors.deepPurple.shade50,
-        border: Border(bottom: BorderSide(color: Colors.deepPurple.shade100)),
+        border:
+        Border(bottom: BorderSide(color: Colors.deepPurple.shade100)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text('CRACHÁ: ${dados['idCrachaTemporario']}',
               style: const TextStyle(
-                  fontWeight: FontWeight.bold, fontSize: 18, color: Colors.deepPurple)),
+                  fontWeight: FontWeight.bold,
+                  fontSize: 18,
+                  color: Colors.deepPurple)),
           Text('${dados['tipoAgente']} ${dados['capacidade']}',
               style: const TextStyle(fontSize: 16)),
         ],

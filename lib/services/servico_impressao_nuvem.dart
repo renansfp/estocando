@@ -1,35 +1,29 @@
-import 'dart:convert';
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:protecin_producao/provider/usuario_provider.dart';
+// lib/services/servico_impressao_nuvem.dart
+// Migrado para Repository Pattern — sem acesso direto ao Firestore.
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'dart:typed_data'; // Importante para Uint8List
+import 'package:protecin_producao/provider/usuario_provider.dart';
+import 'package:protecin_producao/repositories/print_job_repository.dart';
 
 class ServicoImpressaoNuvem {
-
-  /// Envia um comando PPLA para a fila 'print_jobs' que o Monitor está ouvindo
+  /// Envia um comando PPLA para a fila 'print_jobs' que o Monitor está ouvindo.
   static Future<void> enviarParaFila({
     required BuildContext context,
-    required dynamic comandoPPLA, // Aceita List<int> ou Uint8List
-    required String nomeImpressoraDestino, // Ex: "Argox01"
+    required dynamic comandoPPLA,
+    required String nomeImpressoraDestino,
+    required PrintJobRepository repository,
   }) async {
     try {
-      final usuario = Provider.of<UsuarioProvider>(context, listen: false).usuario;
+      final usuario =
+          Provider.of<UsuarioProvider>(context, listen: false).usuario;
 
-
-      // --- AQUI ESTÁ A CORREÇÃO ---
-      // Enviamos para 'print_jobs' com os campos em inglês que o Monitor espera
-      await FirebaseFirestore.instance.collection('print_jobs').add({
-        'printerName': nomeImpressoraDestino,
-        // Forçamos o dado a ser um array de bytes puro
-        'command_list': comandoPPLA,//Uint8List.fromList(
-           // comandoPPLA is String ? ascii.encode(comandoPPLA) : List<int>.from(comandoPPLA)
-        //),
-        'status': 'pending',
-        'createdAt': FieldValue.serverTimestamp(),
-        'usuario_solicitante': usuario?.nome ?? 'Desconhecido',
-        'empresa_id': usuario?.empresaId ?? '',
-      });
+      await repository.enviarComandoPPLA(
+        comandoPPLA: comandoPPLA,
+        nomeImpressora: nomeImpressoraDestino,
+        usuarioNome: usuario?.nome ?? 'Desconhecido',
+        empresaId: usuario?.empresaId ?? '',
+      );
 
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -40,8 +34,8 @@ class ServicoImpressaoNuvem {
           ),
         );
       }
-
     } catch (e) {
+      debugPrint('ServicoImpressaoNuvem erro: $e');
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -50,7 +44,6 @@ class ServicoImpressaoNuvem {
           ),
         );
       }
-      print("Erro Firestore: $e");
     }
   }
 }

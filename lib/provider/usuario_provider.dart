@@ -1,82 +1,85 @@
-// Arquivo: lib/providers/usuario_provider.dart
+// lib/provider/usuario_provider.dart
 
-import 'dart:async'; // Para o StreamSubscription
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:protecin_producao/models/usuario.dart'; // <<< Usando o seu modelo
+import 'package:protecin_producao/models/usuario.dart';
+import 'package:protecin_producao/repositories/usuario_repository.dart';
 
 class UsuarioProvider with ChangeNotifier {
+  final UsuarioRepository _repository;
 
-  // O "Crachá" - O objeto Usuario que vamos guardar
   Usuario? _usuario;
-
-  // O "Vigilante" do Auth
   StreamSubscription<User?>? _authSubscription;
 
-  // Acesso público e seguro ao "Crachá"
   Usuario? get usuario => _usuario;
 
-  // O "Estado de Carregamento"
   bool _isLoading = true;
   bool get isLoading => _isLoading;
 
-  UsuarioProvider() {
-    // 🧠 A "Grande Aula":
-    // Assim que o Provider é criado, ele imediatamente começa
-    // a "escutar" o Firebase Auth.
+  UsuarioProvider(this._repository) {
     _ouvirMudancasAuth();
   }
 
   void _ouvirMudancasAuth() {
-    // Escuta o estado de autenticação (login/logout)
-    _authSubscription = FirebaseAuth.instance.authStateChanges().listen((User? user) {
-      if (user == null) {
-        // --- CASO 1: USUÁRIO FEZ LOGOUT ---
-        _usuario = null; // Limpa o "crachá"
-        _isLoading = false; // Parou de carregar (mesmo que não tenha usuário)
-        notifyListeners(); // Avisa a todos (ex: tela de Login)
-      } else {
-        // --- CASO 2: USUÁRIO FEZ LOGIN ---
-        // Agora, vamos buscar os dados dele no Firestore
-        _carregarDadosUsuario(user.uid);
-      }
-    });
+    _authSubscription =
+        FirebaseAuth.instance.authStateChanges().listen((User? user) {
+          if (user == null) {
+            _usuario = null;
+            _isLoading = false;
+            notifyListeners();
+          } else {
+            _carregarDadosUsuario(user.uid);
+          }
+        });
   }
 
   Future<void> _carregarDadosUsuario(String uid) async {
     try {
-      // Vai na coleção 'usuarios' e pega o documento com o UID do login
-      final doc = await FirebaseFirestore.instance
-          .collection('usuarios')
-          .doc(uid)
-          .get();
-
-      if (doc.exists) {
-        // 🧠 A "Grande Aula":
-        // Aqui usamos o "molde" que você já tinha!
-        // Usamos o factory .fromFirestore para "traduzir"
-        // o JSON do Firebase para a nossa classe Usuario.
-        _usuario = Usuario.fromFirestore(
-          doc.data() as Map<String, dynamic>,
-          uid,
-        );
+      final dados = await _repository.buscarPorId(uid);
+      if (dados != null) {
+        _usuario = Usuario.fromMap(dados, uid);
       } else {
-        // Segurança: usuário logado no Auth, mas sem registro no Firestore
-        print('ALERTA: Usuário $uid não encontrado no Firestore.');
+        debugPrint('ALERTA: Usuário $uid não encontrado no Firestore.');
         _usuario = null;
       }
     } catch (e) {
-      print('ERRO AO CARREGAR USUÁRIO: $e');
-      _usuario = null; // Segurança em caso de erro
+      debugPrint('ERRO AO CARREGAR USUÁRIO: $e');
+      _usuario = null;
     } finally {
-      // Seja sucesso ou falha, o carregamento inicial terminou
       _isLoading = false;
-      notifyListeners(); // Avisa a todos que o usuário (ou null) está pronto
+      notifyListeners();
     }
   }
 
-  // Boa prática: Limpar o "escutador" quando o Provider for destruído
+  /// Retorna todas as empresas distintas cadastradas na coleção [usuarios].
+  /// Cada item é um Map com 'id' (empresaId) e 'nome'.
+  /// Usado pelas telas de importação admin.
+  Future<List<Map<String, String>>> buscarTodasEmpresas() =>
+      _repository.buscarTodasEmpresas();
+
+  // ─── Métodos admin (via UsuarioRepository) ───────────────────────────────
+
+  /// Stream de usuários com status 'pendente'.
+  /// Usado pela tela de aprovação.
+  Stream<List<Map<String, dynamic>>> streamUsuariosPendentes() =>
+      _repository.streamUsuariosPendentes();
+
+  /// Stream de todos os usuários de uma empresa.
+  Stream<List<Map<String, dynamic>>> streamUsuariosPorEmpresa(
+      String empresaId) =>
+      _repository.streamUsuariosPorEmpresa(empresaId);
+
+  /// Aprova um usuário via Cloud Function [approveUser].
+  Future<void> aprovar(String uid) => _repository.aprovar(uid);
+
+  /// Recusa e exclui um usuário via Cloud Function [rejectUser].
+  Future<void> recusar(String uid) => _repository.recusar(uid);
+
+  /// Atualiza os dados de um usuário.
+  Future<void> atualizar(String uid, Map<String, dynamic> dados) =>
+      _repository.atualizar(uid, dados);
+
   @override
   void dispose() {
     _authSubscription?.cancel();

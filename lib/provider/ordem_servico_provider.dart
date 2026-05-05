@@ -44,4 +44,23 @@ class OrdemServicoProvider with ChangeNotifier {
       notifyListeners();
     }
   }
+
+  // ─── Novo método ─────────────────────────────────────────────────────────
+
+  /// Busca uma OS pelo número dentro de uma empresa.
+  /// Tenta com o número exato e depois com zero-padding.
+  /// Retorna [null] se não encontrar.
+  Future<Map<String, dynamic>?> buscarPorNumero(
+      String empresaId, String numeroOS) =>
+      _repository.buscarPorNumero(empresaId, numeroOS);
+
+  Stream<List<Map<String, dynamic>>> streamTodasOrdenadas() =>
+      _repository.streamTodasOrdenadas();
+
+  Stream<Map<String, dynamic>?> streamPorId(String osId) =>
+      _repository.streamPorId(osId);
+
+
+  Future<OrdemServico?> buscarPorId(String osId) =>
+      _repository.buscarPorId(osId);
 }

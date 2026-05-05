@@ -1,7 +1,8 @@
-// Arquivo: lib/services/relatorio_os_service.dart
-// Monta o objeto completo para o relatório técnico da OS.
+// lib/services/relatorio_os_service.dart
+// Migrado para Repository Pattern — sem acesso direto ao Firestore.
+// Recebe 4 funções de busca via construtor, sem depender de nenhum repositório
+// ou provider diretamente. Isso facilita testes e mantém o serviço desacoplado.
 
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:protecin_producao/models/equipamento.dart';
 import 'package:protecin_producao/models/item_os.dart';
 import 'package:protecin_producao/models/ordem_servico.dart';
@@ -21,24 +22,26 @@ class DadosItemRelatorio {
   final String numeroCracha;
 
   // ── N/O/P/Q: Pesos ──────────────────────────────────────────────────────────
-  final String tara;              // Tara gravada no cilindro (dadosTH.taraGravada)
-  final String pv;                // Peso Vazio medido (dadosTH.pesoVazio_PV ou manutValv)
-  final String perdaMassaPct;     // Perda de massa % (dadosTH.perdaMassa_porcento)
-  final String pc;                // Peso Cheio — carga registrada (recarga.peso)
+  final String tara;
+  final String pv;
+  final String perdaMassaPct;
+  final String pc;
 
   // ── R/S: Volume ─────────────────────────────────────────────────────────────
-  final String volumeLts;         // Volume calculado (dadosTH.volumeCalc)
-  final String capMaxCarga;       // Cap. máxima de carga: V×0,68 (dadosTH.cargaMaxCo2)
+  final String volumeLts;
+  final String capMaxCarga;
 
   // ── T/U/V: Pressões TH ──────────────────────────────────────────────────────
-  final String pressaoTeste;      // Pressão de ensaio (dadosTH.pressaoEnsaio / _kgf)
-  final String et;                // Expansão Total em ml (dadosTH.dvt_ml)
-  final String ep;                // EP% — expansão permanente (dadosTH.ep_porcento)
+  final String pressaoTeste;
+  final String et;
+  final String ep;
 
   // ── W: Condenação ───────────────────────────────────────────────────────────
   final String? motivoCondenacao;
 
-  // ── Y: Peças trocadas (futuro — campo ainda não existe no banco) ─────────────
+  // ── Y: Peças trocadas ────────────────────────────────────────────────────────
+  // Quando a tela de peças for criada, o campo 'pecasTrocadas' será uma
+  // List<int> com os números da legenda. Por ora: '---'
   final String pecasTrocadas;
 
   // ── AB: Status final ─────────────────────────────────────────────────────────
@@ -71,8 +74,6 @@ class DadosRelatorioOS {
   final OrdemServico os;
   final Parceiro parceiro;
   final List<DadosItemRelatorio> itens;
-
-  // dataSaida da OS ou, se null, a maior dataExpedicao entre os itens
   final DateTime? dataFinalizacao;
 
   DadosRelatorioOS({
@@ -87,73 +88,77 @@ class DadosRelatorioOS {
 // SERVIÇO
 // =============================================================================
 class RelatorioOsService {
-  final _db = FirebaseFirestore.instance;
+  final Future<OrdemServico?> Function(String osId) _buscarOS;
+  final Future<Map<String, dynamic>?> Function(String parceiroId) _buscarParceiro;
+  final Future<List<Map<String, dynamic>>> Function(String osId) _buscarItens;
+  final Future<Equipamento?> Function(String equipId) _buscarEquipamento;
+
+  RelatorioOsService({
+    required Future<OrdemServico?> Function(String) buscarOS,
+    required Future<Map<String, dynamic>?> Function(String) buscarParceiro,
+    required Future<List<Map<String, dynamic>>> Function(String) buscarItens,
+    required Future<Equipamento?> Function(String) buscarEquipamento,
+  })  : _buscarOS = buscarOS,
+        _buscarParceiro = buscarParceiro,
+        _buscarItens = buscarItens,
+        _buscarEquipamento = buscarEquipamento;
 
   Future<DadosRelatorioOS> buscarDados(String osId) async {
     // ── 1. OS ────────────────────────────────────────────────────────────────
-    final docOS = await _db.collection('ordens_servico').doc(osId).get();
-    if (!docOS.exists) throw Exception('OS "$osId" não encontrada.');
-    final os = OrdemServico.fromJson(docOS.data() as Map<String, dynamic>, docOS.id);
+    final os = await _buscarOS(osId);
+    if (os == null) throw Exception('OS "$osId" não encontrada.');
 
     // ── 2. Parceiro (cliente) ────────────────────────────────────────────────
-    final docParceiro = await _db.collection('parceiros').doc(os.clienteId).get();
+    final parceiroMap = await _buscarParceiro(os.clienteId);
     final Parceiro parceiro;
-    if (docParceiro.exists) {
-      parceiro = Parceiro.fromJson(docParceiro.data() as Map<String, dynamic>, docParceiro.id);
+    if (parceiroMap != null) {
+      parceiro = Parceiro.fromJson(parceiroMap, parceiroMap['id'] as String);
     } else {
       parceiro = Parceiro(
-        id: os.clienteId, codigo: '', tipo: TipoParceiro.cliente,
-        nome: os.clienteNome, empresaId: os.empresaId,
+        id: os.clienteId,
+        codigo: '',
+        tipo: TipoParceiro.cliente,
+        nome: os.clienteNome,
+        empresaId: os.empresaId,
       );
     }
 
-    // ── 3. Itens da OS ───────────────────────────────────────────────────────
-    final snapItens = await _db
-        .collection('itens_os')
-        .where('osId', isEqualTo: osId)
-        .get();
+    // ── 3. Itens + Equipamentos em paralelo ──────────────────────────────────
+    final rawItens = await _buscarItens(osId);
+    if (rawItens.isEmpty) throw Exception('Nenhum item para a OS "$osId".');
 
-    if (snapItens.docs.isEmpty) throw Exception('Nenhum item para a OS "$osId".');
-
-    // ── 4. Equipamentos em paralelo ──────────────────────────────────────────
-    final futures = snapItens.docs.map((docItem) async {
-      final rawItem  = docItem.data();
-      final item     = ItemOS.fromJson(rawItem, docItem.id);
-      final docEquip = await _db.collection('equipamentos').doc(item.equipamentoId).get();
-      if (!docEquip.exists) return null;
-
-      final equipData  = docEquip.data() as Map<String, dynamic>;
-      final equipamento = Equipamento.fromJson(equipData, docEquip.id);
+    final futures = rawItens.map((rawItem) async {
+      final item = ItemOS.fromJson(rawItem, rawItem['id'] as String);
+      final equipamento = await _buscarEquipamento(item.equipamentoId);
+      if (equipamento == null) return null;
 
       // ── Nível de manutenção ──────────────────────────────────────────────
       final roteiro = List<String>.from(rawItem['roteiro'] ?? []);
-      final nivel   = ItemOS.derivarNivel(roteiro);
+      final nivel = ItemOS.derivarNivel(roteiro);
 
-      // ── Crachá (oculto se OS/item finalizado) ────────────────────────────
+      // ── Crachá (oculto se item finalizado) ──────────────────────────────
       final isFinalizado = item.statusAtual == StatusOS.finalizado ||
           item.statusAtual == StatusOS.emExpedicao ||
           (rawItem['status']?.toString() ?? '').contains('entregue');
       final numeroCracha = isFinalizado ? '' : item.idCrachaTemporario;
 
-      // ── Dados do TH (dadosTH do item) ────────────────────────────────────
+      // ── Dados do TH ──────────────────────────────────────────────────────
       final th = rawItem['dadosTH'] as Map<String, dynamic>?;
-
-      final tara          = _fmt(th?['taraGravada']);
-      final pvTH          = _fmt(th?['pesoVazio_PV']);
-      final pvManut       = (rawItem['manutencao_valvula'] as Map?)?['pesoVazio']?.toString() ?? '---';
-      final pv            = pvTH != '---' ? pvTH : pvManut;
+      final tara = _fmt(th?['taraGravada']);
+      final pvTH = _fmt(th?['pesoVazio_PV']);
+      final pvManut =
+          (rawItem['manutencao_valvula'] as Map?)?['pesoVazio']?.toString() ??
+              '---';
+      final pv = pvTH != '---' ? pvTH : pvManut;
       final perdaMassaPct = th?['perdaMassa_porcento'] != null
           ? '${(th!['perdaMassa_porcento'] as num).toStringAsFixed(1)}%'
           : '---';
-      final volumeLts     = _fmt(th?['volumeCalc']);
-      final capMaxCarga   = _fmt(th?['cargaMaxCo2']);
-
-      // Pressão de ensaio: alta pressão usa 'pressaoEnsaio', baixa usa 'pressaoEnsaio_kgf'
+      final volumeLts = _fmt(th?['volumeCalc']);
+      final capMaxCarga = _fmt(th?['cargaMaxCo2']);
       final pressaoTeste = th?['pressaoEnsaio'] != null
           ? _fmt(th!['pressaoEnsaio'])
           : _fmt(th?['pressaoEnsaio_kgf']);
-
-      final et = _fmt(th?['dvt_ml']);  // Expansão Total (ml)
+      final et = _fmt(th?['dvt_ml']);
       final ep = th?['ep_porcento'] != null
           ? '${(th!['ep_porcento'] as num).toStringAsFixed(1)}%'
           : '---';
@@ -163,48 +168,46 @@ class RelatorioOsService {
       final pc = recarga?['peso'] != null ? _fmt(recarga!['peso']) : '---';
 
       // ── Status final ─────────────────────────────────────────────────────
-      final thAprovado    = equipData['th_aprovado'] as bool? ?? false;
-      final statusFinal   = _resolverStatus(item, equipamento, thAprovado);
+      final thAprovado =
+          (equipamento.toJson()['th_aprovado'] as bool?) ?? false;
+      final statusFinal = _resolverStatus(item, equipamento, thAprovado);
 
-      // ── Peças trocadas (futuro) ──────────────────────────────────────────
-      // Quando a tela de peças for criada, o campo 'pecasTrocadas' será uma
-      // List<int> com os números da legenda. Por ora: '---'
+      // ── Peças trocadas ───────────────────────────────────────────────────
       final pecasRaw = rawItem['pecasTrocadas'];
       final pecasTrocadas = pecasRaw is List && pecasRaw.isNotEmpty
           ? pecasRaw.map((e) => e.toString()).join(', ')
           : '---';
 
       return DadosItemRelatorio(
-        item:             item,
-        equipamento:      equipamento,
-        nivelManutencao:  nivel,
-        numeroCracha:     numeroCracha,
-        tara:             tara,
-        pv:               pv,
-        perdaMassaPct:    perdaMassaPct,
-        pc:               pc,
-        volumeLts:        volumeLts,
-        capMaxCarga:      capMaxCarga,
-        pressaoTeste:     pressaoTeste,
-        et:               et,
-        ep:               ep,
+        item: item,
+        equipamento: equipamento,
+        nivelManutencao: nivel,
+        numeroCracha: numeroCracha,
+        tara: tara,
+        pv: pv,
+        perdaMassaPct: perdaMassaPct,
+        pc: pc,
+        volumeLts: volumeLts,
+        capMaxCarga: capMaxCarga,
+        pressaoTeste: pressaoTeste,
+        et: et,
+        ep: ep,
         motivoCondenacao: equipamento.motivoCondenacao,
-        pecasTrocadas:    pecasTrocadas,
-        statusFinal:      statusFinal,
+        pecasTrocadas: pecasTrocadas,
+        statusFinal: statusFinal,
       );
     });
 
     final resultados = await Future.wait(futures);
     final itens = resultados.whereType<DadosItemRelatorio>().toList();
+    itens.sort(
+            (a, b) => a.equipamento.ativoFixo.compareTo(b.equipamento.ativoFixo));
 
-    // Ordena por ativo fixo
-    itens.sort((a, b) => (a.equipamento.ativoFixo).compareTo(b.equipamento.ativoFixo));
-
-    // Deriva data de finalização: usa dataSaida da OS ou a maior dataExpedicao dos itens
+    // ── Data de finalização ──────────────────────────────────────────────────
     DateTime? dataFinalizacao = os.dataSaida;
     if (dataFinalizacao == null) {
-      for (final doc in snapItens.docs) {
-        final ts = doc.data()['dataExpedicao'];
+      for (final raw in rawItens) {
+        final ts = raw['dataExpedicao'];
         if (ts != null) {
           final dt = (ts as dynamic).toDate() as DateTime;
           if (dataFinalizacao == null || dt.isAfter(dataFinalizacao)) {
@@ -222,15 +225,18 @@ class RelatorioOsService {
     );
   }
 
-  // ─── AUXILIARES ──────────────────────────────────────────────────────────
+  // ─── AUXILIARES ────────────────────────────────────────────────────────────
   String _fmt(dynamic valor) {
     if (valor == null) return '---';
-    if (valor is double) return valor.toStringAsFixed(valor.truncateToDouble() == valor ? 0 : 1);
-    if (valor is int)    return valor.toString();
+    if (valor is double) {
+      return valor.toStringAsFixed(valor.truncateToDouble() == valor ? 0 : 1);
+    }
+    if (valor is int) return valor.toString();
     return valor.toString();
   }
 
-  String _resolverStatus(ItemOS item, Equipamento equipamento, bool thAprovado) {
+  String _resolverStatus(
+      ItemOS item, Equipamento equipamento, bool thAprovado) {
     if (equipamento.status == StatusEquipamento.baixado) return 'C';
     if (thAprovado || item.statusAtual == StatusOS.finalizado) return 'OK';
     return 'NC';

@@ -96,4 +96,33 @@ class FirestoreEquipamentoRepository implements EquipamentoRepository {
 
     return finalizada ? DiagnosticoBloqueio.osFinalizada : DiagnosticoBloqueio.osAberta;
   }
+
+  @override
+  Future<Equipamento?> buscarPorCodigo({
+    required String empresaId,
+    required String clienteId,
+    required String codigo,
+  }) async {
+    // Tenta primeiro pelo ativo fixo
+    var snap = await _col
+        .where('empresaId', isEqualTo: empresaId)
+        .where('clienteId', isEqualTo: clienteId)
+        .where('ativoFixo', isEqualTo: codigo)
+        .limit(1)
+        .get();
+
+    // Fallback: tenta pelo número de cilindro
+    if (snap.docs.isEmpty) {
+      snap = await _col
+          .where('empresaId', isEqualTo: empresaId)
+          .where('clienteId', isEqualTo: clienteId)
+          .where('numeroCilindro', isEqualTo: codigo)
+          .limit(1)
+          .get();
+    }
+
+    if (snap.docs.isEmpty) return null;
+    final doc = snap.docs.first;
+    return Equipamento.fromJson(doc.data() as Map<String, dynamic>, doc.id);
+  }
 }

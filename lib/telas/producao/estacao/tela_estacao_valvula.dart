@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:provider/provider.dart';
+import 'package:protecin_producao/provider/item_os_provider.dart';
 
 class TelaEstacaoValvula extends StatefulWidget {
   final String osId;
@@ -10,29 +11,36 @@ class TelaEstacaoValvula extends StatefulWidget {
 }
 
 class _TelaEstacaoValvulaState extends State<TelaEstacaoValvula> {
-  // Cor do setor Válvula (Teal)
   final Color _corSetor = Colors.teal[700]!;
 
-  Future<void> _confirmarManutencao(String itemId, String codigo) async {
+  Future<void> _confirmarManutencao(Map<String, dynamic> item) async {
     try {
-      await FirebaseFirestore.instance.collection('itens_os').doc(itemId).update({
-        'status': 'aguardando_saque_valvula', // PRÓXIMO PASSO OBRIGATÓRIO (Passo 6)
-        'valvula_manutencao': {
-          'data': FieldValue.serverTimestamp(),
-          'operador': 'operador_valvula',
-        }
-      });
+      await context.read<ItemOsProvider>().confirmarEtapa(
+        itemId: item['id'],
+        dadosItem: {
+          'valvula_manutencao': {
+            'data': DateTime.now(),
+            'operador': 'operador_valvula',
+          }
+        },
+        osId: widget.osId,
+        statusPendente: 'aguardando_manutencao_valvula',
+        proximaEstacao: 'saque_valvula',
+      );
 
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Item $codigo enviado para SAQUE DE VÁLVULA'),
-            duration: const Duration(milliseconds: 800),
-            backgroundColor: Colors.indigo,
-          )
+        SnackBar(
+          content: Text('Item ${item['idCrachaTemporario']} enviado para SAQUE DE VÁLVULA'),
+          duration: const Duration(milliseconds: 800),
+          backgroundColor: Colors.indigo,
+        ),
       );
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Erro ao salvar')));
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(const SnackBar(content: Text('Erro ao salvar')));
+      }
     }
   }
 
@@ -44,24 +52,26 @@ class _TelaEstacaoValvulaState extends State<TelaEstacaoValvula> {
         backgroundColor: _corSetor,
         foregroundColor: Colors.white,
       ),
-      body: StreamBuilder<QuerySnapshot>(
-        stream: FirebaseFirestore.instance
-            .collection('itens_os')
-            .where('osId', isEqualTo: widget.osId)
-            .where('status', isEqualTo: 'aguardando_manutencao_valvula')
-            .snapshots(),
+      body: StreamBuilder<List<Map<String, dynamic>>>(
+        stream: context
+            .read<ItemOsProvider>()
+            .streamItensPorOsEStatus(widget.osId, 'aguardando_manutencao_valvula'),
         builder: (context, snapshot) {
-          if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
+          if (!snapshot.hasData) {
+            return const Center(child: CircularProgressIndicator());
+          }
+          final itens = snapshot.data!;
 
-          final itens = snapshot.data!.docs;
-
-          // Lixeiro Automático (Fecha a tela quando o lote acaba)
+          // Fecha automaticamente quando o lote acaba
           if (itens.isEmpty) {
             WidgetsBinding.instance.addPostFrameCallback((_) {
               if (mounted) {
                 Navigator.of(context).pop();
                 ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Manutenção concluída! Lote enviado para Saque.'), backgroundColor: Colors.green),
+                  const SnackBar(
+                    content: Text('Manutenção concluída! Lote enviado para Saque.'),
+                    backgroundColor: Colors.green,
+                  ),
                 );
               }
             });
@@ -72,9 +82,8 @@ class _TelaEstacaoValvulaState extends State<TelaEstacaoValvula> {
             itemCount: itens.length,
             itemBuilder: (context, index) {
               final item = itens[index];
-              final dados = item.data() as Map<String, dynamic>;
-              final codigo = dados['idCrachaTemporario'] ?? '???';
-              final tipo = dados['tipoAgente'] ?? '';
+              final codigo = item['idCrachaTemporario'] ?? '???';
+              final tipo = item['tipoAgente'] ?? '';
 
               return Card(
                 margin: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
@@ -84,17 +93,19 @@ class _TelaEstacaoValvulaState extends State<TelaEstacaoValvula> {
                     backgroundColor: Colors.teal[100],
                     child: Icon(Icons.settings_applications, color: _corSetor),
                   ),
-                  title: Text('Extintor: $codigo', style: const TextStyle(fontWeight: FontWeight.bold)),
+                  title: Text('Extintor: $codigo',
+                      style: const TextStyle(fontWeight: FontWeight.bold)),
                   subtitle: Text('Tipo: ${tipo.toUpperCase()}'),
                   trailing: ElevatedButton.icon(
                     style: ElevatedButton.styleFrom(
                       backgroundColor: _corSetor,
                       foregroundColor: Colors.white,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8)),
                     ),
                     icon: const Icon(Icons.check, size: 16),
                     label: const Text('CONCLUÍDO'),
-                    onPressed: () => _confirmarManutencao(item.id, codigo),
+                    onPressed: () => _confirmarManutencao(item),
                   ),
                 ),
               );

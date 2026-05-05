@@ -1,6 +1,9 @@
+// lib/telas/producao/estacao/tela_estacao_lixa.dart
+
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import 'package:protecin_producao/provider/item_os_provider.dart';
 import 'package:protecin_producao/widgets/botao_condenar.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:protecin_producao/widgets/campo_com_scanner.dart';
 
 class TelaEstacaoLixa extends StatefulWidget {
@@ -22,65 +25,46 @@ class _TelaEstacaoLixaState extends State<TelaEstacaoLixa> {
     return limpo.replaceAll('R-', '');
   }
 
-  Future<void> _confirmarLixamento(DocumentSnapshot itemDoc) async {
+  Future<void> _confirmarLixamento(Map<String, dynamic> item) async {
     if (_processando) return;
     setState(() => _processando = true);
 
     try {
-      final dados = itemDoc.data() as Map<String, dynamic>;
-      final codigo = dados['idCrachaTemporario'] ?? '???';
-      final List<String> roteiro = List<String>.from(dados['roteiro'] ?? []);
+      final codigo = item['idCrachaTemporario'] ?? '???';
+      final List<String> roteiro = List<String>.from(item['roteiro'] ?? []);
 
-      // LÓGICA DO ROTEIRO: Descobre o próximo passo baseado no DNA do item
       int indexLixa = roteiro.indexOf('lixa');
       if (indexLixa == -1 || indexLixa >= roteiro.length - 1) {
         throw 'Erro: Próxima etapa não encontrada no roteiro.';
       }
-
       String proximaEstacao = roteiro[indexLixa + 1];
-      String proximoStatus = 'aguardando_$proximaEstacao';
 
-      final firestore = FirebaseFirestore.instance;
-      final batch = firestore.batch();
-
-      // 1. Atualiza o item individual
-      batch.update(itemDoc.reference, {
-        'status': proximoStatus,
-        'lixa': {
-          'data': FieldValue.serverTimestamp(),
-          'operador': 'operador_lixa',
-        }
-      });
-
-      // 2. Trava de Segurança: Verifica se restam itens pendentes NA LIXA
-      final queryPendentes = await firestore
-          .collection('itens_os')
-          .where('osId', isEqualTo: widget.osId)
-          .where('status', isEqualTo: 'aguardando_lixa')
-          .get();
-
-      // 3. Se for o último, move a OS para a próxima etapa do roteiro
-      if (queryPendentes.docs.length <= 1) {
-        final osRef = firestore.collection('ordens_servico').doc(widget.osId);
-        batch.update(osRef, {
-          'etapaAtual': proximaEstacao,
-          'dataFimLixa': FieldValue.serverTimestamp(),
-        });
-      }
-
-      await batch.commit();
+      await context.read<ItemOsProvider>().confirmarEtapa(
+        itemId: item['id'],
+        dadosItem: {
+          'lixa': {
+            'data': DateTime.now(),
+            'operador': 'operador_lixa',
+          }
+        },
+        osId: widget.osId,
+        statusPendente: 'aguardando_lixa',
+        proximaEstacao: proximaEstacao,
+      );
 
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Cilindro $codigo finalizado -> Seguindo para $proximaEstacao'),
-            backgroundColor: Colors.green,
-            duration: const Duration(milliseconds: 1000),
-          ),
-        );
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('Cilindro $codigo finalizado -> Seguindo para $proximaEstacao'),
+          backgroundColor: Colors.green,
+          duration: const Duration(milliseconds: 1000),
+        ));
       }
     } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Erro: $e'), backgroundColor: Colors.red));
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Erro: $e'), backgroundColor: Colors.red),
+        );
+      }
     } finally {
       if (mounted) setState(() => _processando = false);
     }
@@ -90,18 +74,20 @@ class _TelaEstacaoLixaState extends State<TelaEstacaoLixa> {
     if (codigo.isEmpty) return;
     String idCracha = _limparCodigo(codigo);
 
-    final query = await FirebaseFirestore.instance
-        .collection('itens_os')
-        .where('osId', isEqualTo: widget.osId)
-        .where('idCrachaTemporario', isEqualTo: idCracha)
-        .where('status', isEqualTo: 'aguardando_lixa')
-        .limit(1)
-        .get();
+    final item = await context.read<ItemOsProvider>().buscarItemPorCracha(
+      widget.osId,
+      idCracha,
+      'aguardando_lixa',
+    );
 
-    if (query.docs.isNotEmpty) {
-      _confirmarLixamento(query.docs.first);
+    if (item != null) {
+      _confirmarLixamento(item);
     } else {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Crachá inválido para lixa.')));
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Crachá inválido para lixa.')),
+        );
+      }
     }
     _scannerController.clear();
   }
@@ -109,26 +95,33 @@ class _TelaEstacaoLixaState extends State<TelaEstacaoLixa> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Execução: Lixa/Jato'), backgroundColor: _corSetor, foregroundColor: Colors.white),
+      appBar: AppBar(
+        title: const Text('Execução: Lixa/Jato'),
+        backgroundColor: _corSetor,
+        foregroundColor: Colors.white,
+      ),
       body: Column(
         children: [
           Container(
             padding: const EdgeInsets.all(12.0),
             color: Colors.blueGrey.shade50,
-            child: CampoComScanner(controller: _scannerController, label: 'Bipar Crachá para Lixar', onSubmitted: _processarBipe),
+            child: CampoComScanner(
+              controller: _scannerController,
+              label: 'Bipar Crachá para Lixar',
+              onSubmitted: _processarBipe,
+            ),
           ),
           if (_processando) const LinearProgressIndicator(),
           Expanded(
-            child: StreamBuilder<QuerySnapshot>(
-              stream: FirebaseFirestore.instance
-                  .collection('itens_os')
-                  .where('osId', isEqualTo: widget.osId)
-                  .where('status', isEqualTo: 'aguardando_lixa')
-                  .snapshots(),
+            child: StreamBuilder<List<Map<String, dynamic>>>(
+              stream: context
+                  .read<ItemOsProvider>()
+                  .streamItensPorOsEStatus(widget.osId, 'aguardando_lixa'),
               builder: (context, snapshot) {
-                if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
-                final itens = snapshot.data!.docs;
-
+                if (!snapshot.hasData) {
+                  return const Center(child: CircularProgressIndicator());
+                }
+                final itens = snapshot.data!;
                 if (itens.isEmpty) return _buildConcluido();
 
                 return ListView.builder(
@@ -136,17 +129,20 @@ class _TelaEstacaoLixaState extends State<TelaEstacaoLixa> {
                   itemCount: itens.length,
                   itemBuilder: (context, index) {
                     final item = itens[index];
-                    final d = item.data() as Map<String, dynamic>;
                     return Card(
                       child: ListTile(
                         leading: Icon(Icons.build, color: _corSetor),
-                        title: Text('Crachá: ${d['idCrachaTemporario']}'),
-                        subtitle: Text('Agente: ${d['tipoAgente']}'),
+                        title: Text('Crachá: ${item['idCrachaTemporario']}'),
+                        subtitle: Text('Agente: ${item['tipoAgente']}'),
                         trailing: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            BotaoCondenar(itemDoc: item, etapa: 'lixa'),
-                            IconButton(icon: const Icon(Icons.check_circle, color: Colors.green), onPressed: () => _confirmarLixamento(item)),
+                            BotaoCondenar(item: item, etapa: 'lixa'),
+                            IconButton(
+                              icon: const Icon(Icons.check_circle,
+                                  color: Colors.green),
+                              onPressed: () => _confirmarLixamento(item),
+                            ),
                           ],
                         ),
                       ),
@@ -168,9 +164,13 @@ class _TelaEstacaoLixaState extends State<TelaEstacaoLixa> {
         children: [
           const Icon(Icons.verified, size: 80, color: Colors.green),
           const SizedBox(height: 20),
-          const Text('Etapa Lixa Concluída!', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+          const Text('Etapa Lixa Concluída!',
+              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
           const SizedBox(height: 30),
-          ElevatedButton(onPressed: () => Navigator.pop(context), child: const Text('VOLTAR PARA A FILA')),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('VOLTAR PARA A FILA'),
+          ),
         ],
       ),
     );

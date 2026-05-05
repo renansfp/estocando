@@ -5,8 +5,6 @@ import 'package:protecin_producao/models/ordem_servico.dart';
 import 'package:protecin_producao/models/parceiro.dart';
 
 abstract class OrdemServicoRepository {
-  /// Cria uma OS completa com todos os itens em uma operação atômica.
-  /// Retorna o número da OS gerada (ex: "00006").
   Future<String> criarOS({
     required OrdemServico os,
     required List<ItemOS> itens,
@@ -14,6 +12,19 @@ abstract class OrdemServicoRepository {
     required String observacoes,
   });
 
-  /// Retorna stream com todas as OS da empresa.
   Stream<List<OrdemServico>> listarPorEmpresa(String empresaId);
+  Stream<List<Map<String, dynamic>>> streamTodasOrdenadas();
+
+  Future<Map<String, dynamic>?> buscarPorNumero(
+      String empresaId, String numeroOS);
+
+  // ─── Novo método ─────────────────────────────────────────────────────────
+
+  /// Stream reativo de uma OS específica pelo ID.
+  /// Emite null se o documento não existir.
+  Stream<Map<String, dynamic>?> streamPorId(String osId);
+
+
+  /// Busca uma OS pelo ID. Retorna null se não encontrada.
+  Future<OrdemServico?> buscarPorId(String osId);
 }
