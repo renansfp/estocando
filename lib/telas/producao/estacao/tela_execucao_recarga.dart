@@ -1,14 +1,43 @@
 // lib/telas/producao/estacao/tela_execucao_recarga.dart
-// TODO resolvido: _buildSeletorLotes migrado para ProdutoProvider.
-// Removido import cloud_firestore — sem acesso direto ao Firestore nesta tela.
+// Otimizado na sessão 20: equipamento, produto e stream de lotes
+// são carregados UMA vez no initState em vez de a cada rebuild.
 
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:protecin_producao/models/equipamento.dart';
+import 'package:protecin_producao/models/usuario.dart';
 import 'package:protecin_producao/provider/equipamento_provider.dart';
 import 'package:protecin_producao/provider/item_os_provider.dart';
 import 'package:protecin_producao/provider/produto_provider.dart';
+import 'package:protecin_producao/provider/usuario_provider.dart';
 import 'package:protecin_producao/utils/mapeador_custos.dart';
+import 'package:protecin_producao/widgets/dialog_pecas_trocadas.dart';
+import 'package:protecin_producao/widgets/seletor_operador.dart';
+
+// ── Dossiê com tudo que a tela precisa carregar uma vez ─────────────────────
+// Em vez de 3 FutureBuilder/StreamBuilder no build() (cada um disparado a cada
+// rebuild da tela), carregamos tudo de uma vez no initState e mantemos aqui.
+class _DadosCarregados {
+  final Equipamento equipamento;
+  final String agente;
+  final double pesoCapacidade;
+  final bool isPo;
+  final bool substituir;
+  final String codigoMestre;
+  final Map<String, dynamic>? produto;
+  final Stream<List<Map<String, dynamic>>>? streamLotes;
+
+  _DadosCarregados({
+    required this.equipamento,
+    required this.agente,
+    required this.pesoCapacidade,
+    required this.isPo,
+    required this.substituir,
+    required this.codigoMestre,
+    this.produto,
+    this.streamLotes,
+  });
+}
 
 class TelaExecucaoRecarga extends StatefulWidget {
   final Map<String, dynamic> item;
@@ -25,7 +54,65 @@ class _TelaExecucaoRecargaState extends State<TelaExecucaoRecarga> {
   bool _carregando = false;
   String? _loteSelecionadoId;
   String? _loteSelecionadoNumero;
+  String? _produtoId;
   final TextEditingController _pesoCo2Controller = TextEditingController();
+
+  // Future estável — criada UMA vez no initState.
+  late final Future<_DadosCarregados?> _futureDados;
+
+  @override
+  void initState() {
+    super.initState();
+    _futureDados = _carregarDados();
+  }
+
+  // Carrega equipamento → produto → prepara stream de lotes em uma única
+  // cascata async. Tudo cacheado no _DadosCarregados e reaproveitado em
+  // qualquer rebuild da tela (sem novas queries Firestore).
+  Future<_DadosCarregados?> _carregarDados() async {
+    final equipId = widget.item['equipamentoId'] as String? ?? '';
+    if (equipId.isEmpty) return null;
+
+    final equip =
+    await context.read<EquipamentoProvider>().buscarPorId(equipId);
+    if (equip == null || !mounted) return null;
+
+    final agente = equip.tipo.toUpperCase();
+    final pesoCapacidade = _extrairPeso(equip.capacidade);
+    final isPo = agente.contains('ABC') || agente.contains('BC');
+    final substituir = equip.substituirPo;
+    final codigoMestre = _obterCodigoMestre(agente, pesoCapacidade);
+
+    Map<String, dynamic>? produto;
+    Stream<List<Map<String, dynamic>>>? streamLotes;
+
+    // Só carrega produto e lotes se for Pó com substituição.
+    // Para CO₂ ou reaproveitamento, essas queries não são necessárias.
+    if (isPo && substituir && codigoMestre.isNotEmpty) {
+      final empresaId =
+          context.read<UsuarioProvider>().usuario?.empresaId ?? '';
+      produto = await context
+          .read<ProdutoProvider>()
+          .buscarPorCodigo(empresaId, codigoMestre);
+
+      if (produto != null && mounted) {
+        streamLotes = context
+            .read<ProdutoProvider>()
+            .streamLotesPorProduto(produto['id'] as String);
+      }
+    }
+
+    return _DadosCarregados(
+      equipamento: equip,
+      agente: agente,
+      pesoCapacidade: pesoCapacidade,
+      isPo: isPo,
+      substituir: substituir,
+      codigoMestre: codigoMestre,
+      produto: produto,
+      streamLotes: streamLotes,
+    );
+  }
 
   double _extrairPeso(String? capacidade) {
     if (capacidade == null || capacidade.isEmpty) return 0.0;
@@ -44,9 +131,21 @@ class _TelaExecucaoRecargaState extends State<TelaExecucaoRecarga> {
     return '';
   }
 
+  /// Retorna true para extintores de Água e Espuma —
+  /// são os únicos que registram as peças de válvula aqui
+  /// (Pó registra em tela_estacao_valvula_po, CO₂ em tela_estacao_manutencao_valvula)
+  bool _isAguaOuEspuma(String agente) {
+    final a = agente.toUpperCase();
+    return a.contains('AGUA') ||
+        a.contains('ÁGUA') ||
+        a.contains('AP') ||
+        a.contains('ESPUMA') ||
+        a.contains('EM') ||
+        a.contains('LGE');
+  }
+
   @override
   Widget build(BuildContext context) {
-    final String equipId = widget.item['equipamentoId'] ?? '';
     final Color corRecarga = Colors.green.shade700;
 
     return Scaffold(
@@ -54,22 +153,31 @@ class _TelaExecucaoRecargaState extends State<TelaExecucaoRecarga> {
         title: const Text('Execução de Recarga'),
         backgroundColor: corRecarga,
         foregroundColor: Colors.white,
+        actions: const [
+          SeletorOperador(estacao: EstacaoProducao.recarga),
+        ],
       ),
-      body: FutureBuilder<Equipamento?>(
-        future: context.read<EquipamentoProvider>().buscarPorId(equipId),
+      body: FutureBuilder<_DadosCarregados?>(
+        future: _futureDados,
         builder: (context, snapshot) {
-          if (!snapshot.hasData) {
+          if (snapshot.connectionState == ConnectionState.waiting) {
             return const Center(child: CircularProgressIndicator());
           }
 
-          final equip = snapshot.data!;
-          final String agente = equip.tipo.toUpperCase();
-          final double pesoCapacidade = _extrairPeso(equip.capacidade);
-          final bool isPo =
-              agente.contains('ABC') || agente.contains('BC');
-          final bool substituir = equip.substituirPo;
-          final String codigoMestre =
-          _obterCodigoMestre(agente, pesoCapacidade);
+          if (snapshot.data == null) {
+            return const Center(
+              child: Padding(
+                padding: EdgeInsets.all(20),
+                child: Text(
+                  'Equipamento não encontrado.\nVoltar e tentar novamente.',
+                  textAlign: TextAlign.center,
+                ),
+              ),
+            );
+          }
+
+          final dados = snapshot.data!;
+          final equip = dados.equipamento;
 
           return SingleChildScrollView(
             padding: const EdgeInsets.all(20),
@@ -78,11 +186,11 @@ class _TelaExecucaoRecargaState extends State<TelaExecucaoRecarga> {
               children: [
                 _buildCardInfo(equip, corRecarga),
                 const SizedBox(height: 20),
-                _buildCardDecisao(substituir, equip.lotePo),
+                _buildCardDecisao(dados.substituir, equip.lotePo),
                 const SizedBox(height: 20),
-                if (isPo && substituir)
-                  _buildSeletorLotes(codigoMestre)
-                else if (agente.contains('CO2'))
+                if (dados.isPo && dados.substituir)
+                  _buildSeletorLotes(dados.produto, dados.streamLotes)
+                else if (dados.agente.contains('CO2'))
                   _buildCampoPesoCO2(),
                 const SizedBox(height: 40),
                 SizedBox(
@@ -97,8 +205,14 @@ class _TelaExecucaoRecargaState extends State<TelaExecucaoRecarga> {
                         foregroundColor: Colors.white),
                     onPressed: _carregando
                         ? null
-                        : () => _processarRecarga(equip, codigoMestre,
-                        isPo, substituir, pesoCapacidade, agente),
+                        : () => _processarRecarga(
+                      equip,
+                      dados.codigoMestre,
+                      dados.isPo,
+                      dados.substituir,
+                      dados.pesoCapacidade,
+                      dados.agente,
+                    ),
                   ),
                 ),
               ],
@@ -172,10 +286,20 @@ class _TelaExecucaoRecargaState extends State<TelaExecucaoRecarga> {
     );
   }
 
-  // Migrado para ProdutoProvider — sem Firestore direto.
-  // Usa FutureBuilder para achar o produto pelo código mestre,
-  // depois StreamBuilder para os lotes desse produto.
-  Widget _buildSeletorLotes(String codigoMestre) {
+  // Agora recebe produto e stream já carregados — sem queries no build.
+  Widget _buildSeletorLotes(
+      Map<String, dynamic>? produto,
+      Stream<List<Map<String, dynamic>>>? streamLotes,
+      ) {
+    if (produto == null || streamLotes == null) {
+      return const Padding(
+        padding: EdgeInsets.all(8.0),
+        child: Text('Produto não encontrado no estoque.'),
+      );
+    }
+
+    final String produtoId = produto['id'] as String;
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -184,67 +308,49 @@ class _TelaExecucaoRecargaState extends State<TelaExecucaoRecarga> {
           style: TextStyle(fontWeight: FontWeight.bold),
         ),
         const SizedBox(height: 10),
-        FutureBuilder<Map<String, dynamic>?>(
-          future: context
-              .read<ProdutoProvider>()
-              .buscarPorCodigo(codigoMestre),
-          builder: (context, prodSnap) {
-            if (prodSnap.connectionState == ConnectionState.waiting) {
+        StreamBuilder<List<Map<String, dynamic>>>(
+          stream: streamLotes,
+          builder: (context, loteSnap) {
+            if (loteSnap.connectionState == ConnectionState.waiting) {
               return const Center(child: CircularProgressIndicator());
             }
-            if (!prodSnap.hasData || prodSnap.data == null) {
-              return const Text('Produto não encontrado no estoque.');
+
+            final lotes = loteSnap.data ?? [];
+            if (lotes.isEmpty) {
+              return const Padding(
+                padding: EdgeInsets.all(8.0),
+                child: Text('Nenhum lote encontrado.'),
+              );
             }
 
-            final String produtoId = prodSnap.data!['id'] as String;
+            return ListView.builder(
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              itemCount: lotes.length,
+              itemBuilder: (context, index) {
+                final lote = lotes[index];
+                final loteId = lote['id'] as String;
+                final bool selecionado = _loteSelecionadoId == loteId;
 
-            return StreamBuilder<List<Map<String, dynamic>>>(
-              stream: context
-                  .read<ProdutoProvider>()
-                  .streamLotesPorProduto(produtoId),
-              builder: (context, loteSnap) {
-                if (loteSnap.connectionState == ConnectionState.waiting) {
-                  return const Center(child: CircularProgressIndicator());
-                }
-
-                final lotes = loteSnap.data ?? [];
-                if (lotes.isEmpty) {
-                  return const Padding(
-                    padding: EdgeInsets.all(8.0),
-                    child: Text('Nenhum lote encontrado.'),
-                  );
-                }
-
-                return ListView.builder(
-                  shrinkWrap: true,
-                  physics: const NeverScrollableScrollPhysics(),
-                  itemCount: lotes.length,
-                  itemBuilder: (context, index) {
-                    final lote = lotes[index];
-                    final loteId = lote['id'] as String;
-                    final bool selecionado = _loteSelecionadoId == loteId;
-
-                    return Card(
-                      color: selecionado
-                          ? Colors.green.shade50
-                          : Colors.white,
-                      child: ListTile(
-                        leading: Icon(Icons.layers,
-                            color: selecionado
-                                ? Colors.green
-                                : Colors.grey),
-                        title: Text(
-                            'Lote: ${lote['numero'] ?? 'S/N'}'),
-                        subtitle: Text(
-                            'Saldo: ${lote['quantidadeAtual'] ?? '0'} kg'),
-                        onTap: () => setState(() {
-                          _loteSelecionadoId = loteId;
-                          _loteSelecionadoNumero =
-                              lote['numero']?.toString();
-                        }),
-                      ),
-                    );
-                  },
+                return Card(
+                  color: selecionado
+                      ? Colors.green.shade50
+                      : Colors.white,
+                  child: ListTile(
+                    leading: Icon(Icons.layers,
+                        color: selecionado
+                            ? Colors.green
+                            : Colors.grey),
+                    title: Text('Lote: ${lote['numero'] ?? 'S/N'}'),
+                    subtitle: Text(
+                        'Saldo: ${lote['quantidadeAtual'] ?? '0'} kg'),
+                    onTap: () => setState(() {
+                      _loteSelecionadoId = loteId;
+                      _loteSelecionadoNumero =
+                          lote['numero']?.toString();
+                      _produtoId = produtoId;
+                    }),
+                  ),
                 );
               },
             );
@@ -282,6 +388,31 @@ class _TelaExecucaoRecargaState extends State<TelaExecucaoRecarga> {
       return;
     }
 
+    // ── Captura providers ANTES de qualquer await ──────────────────────────
+    final itemOsProvider = context.read<ItemOsProvider>();
+    final usuario = context.read<UsuarioProvider>().operadorAtivo;
+    final empresaId = usuario?.empresaId ??
+        context.read<UsuarioProvider>().usuario?.empresaId ??
+        '';
+    final operador = usuario?.nome ?? 'Operador';
+
+    // ── Dialog de peças — apenas para Água e Espuma ────────────────────────
+    Map<int, String> pecasSelecionadas = {};
+    if (_isAguaOuEspuma(agente)) {
+      final resultado = await mostrarDialogPecasTrocadas(
+        context: context,
+        legendasDisponiveis: [1, 4, 9, 13, 15, 16, 20, 26],
+        legendasObrigatorias: [13, 15],
+        tipoEquipamento: equip.tipo,
+        capacidadeEquipamento: equip.capacidade,
+        fabricanteEquipamento: equip.fabricante,
+      );
+
+      // Operador cancelou
+      if (resultado == null) return;
+      pecasSelecionadas = resultado;
+    }
+
     setState(() => _carregando = true);
 
     try {
@@ -300,7 +431,8 @@ class _TelaExecucaoRecargaState extends State<TelaExecucaoRecarga> {
       final String tipoRegistro =
       isPo && substituirPo ? 'CARGA NOVA' : 'REAPROVEITAMENTO';
 
-      await context.read<ItemOsProvider>().processarRecarga(
+      // ── Processa a recarga ─────────────────────────────────────────────
+      await itemOsProvider.processarRecarga(
         itemId: widget.item['id'],
         osId: widget.osId,
         equipamentoId: widget.item['equipamentoId'] ?? '',
@@ -313,10 +445,21 @@ class _TelaExecucaoRecargaState extends State<TelaExecucaoRecarga> {
         loteFinal: loteFinal,
         tipoRegistro: tipoRegistro,
         loteSelecionadoId: _loteSelecionadoId,
-        codigoMestre: codigoMestre,
+        produtoId: _produtoId,
         clienteNome: equip.clienteNome,
         cc: MapeadorCustos.obterCC('RECARGA E TESTES EQUIPAMENTOS PQS'),
+        operador: operador,
       );
+
+      // ── Registra peças de Água/Espuma ──────────────────────────────────
+      if (pecasSelecionadas.isNotEmpty) {
+        await itemOsProvider.registrarPecasTrocadas(
+          itemId: widget.item['id'],
+          osId: widget.osId,
+          empresaId: empresaId,
+          pecas: pecasSelecionadas,q
+        );
+      }
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(

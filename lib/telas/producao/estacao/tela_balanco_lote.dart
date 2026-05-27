@@ -4,9 +4,12 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:protecin_producao/models/equipamento.dart';
+import 'package:protecin_producao/models/usuario.dart';
 import 'package:protecin_producao/provider/equipamento_provider.dart';
 import 'package:protecin_producao/provider/item_os_provider.dart';
+import 'package:protecin_producao/provider/usuario_provider.dart';
 import 'package:protecin_producao/widgets/campo_com_scanner.dart';
+import 'package:protecin_producao/widgets/seletor_operador.dart';
 
 class TelaBalancoLote extends StatefulWidget {
   final String osId;
@@ -40,9 +43,10 @@ class _TelaBalancoLoteState extends State<TelaBalancoLote> {
     final idCracha = _limparCodigo(codigo);
 
     try {
+      final operador = context.read<UsuarioProvider>().operadorAtivo?.nome ?? 'Operador';
       await context
           .read<ItemOsProvider>()
-          .confirmarDescargaPorCracha(widget.osId, idCracha);
+          .confirmarDescargaPorCracha(widget.osId, idCracha, operador);
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
@@ -76,6 +80,9 @@ class _TelaBalancoLoteState extends State<TelaBalancoLote> {
           onPressed: () =>
               Navigator.of(context).popUntil((route) => route.isFirst),
         ),
+        actions: const [
+          SeletorOperador(estacao: EstacaoProducao.descarga),
+        ],
       ),
       body: Column(
         children: [

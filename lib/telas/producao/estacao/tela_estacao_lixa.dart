@@ -2,9 +2,12 @@
 
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:protecin_producao/models/usuario.dart';
 import 'package:protecin_producao/provider/item_os_provider.dart';
+import 'package:protecin_producao/provider/usuario_provider.dart';
 import 'package:protecin_producao/widgets/botao_condenar.dart';
 import 'package:protecin_producao/widgets/campo_com_scanner.dart';
+import 'package:protecin_producao/widgets/seletor_operador.dart';
 
 class TelaEstacaoLixa extends StatefulWidget {
   final String osId;
@@ -38,13 +41,14 @@ class _TelaEstacaoLixaState extends State<TelaEstacaoLixa> {
         throw 'Erro: Próxima etapa não encontrada no roteiro.';
       }
       String proximaEstacao = roteiro[indexLixa + 1];
+      final operador = context.read<UsuarioProvider>().operadorAtivo?.nome ?? 'Operador';
 
       await context.read<ItemOsProvider>().confirmarEtapa(
         itemId: item['id'],
         dadosItem: {
           'lixa': {
             'data': DateTime.now(),
-            'operador': 'operador_lixa',
+            'operador': operador,
           }
         },
         osId: widget.osId,
@@ -74,10 +78,11 @@ class _TelaEstacaoLixaState extends State<TelaEstacaoLixa> {
     if (codigo.isEmpty) return;
     String idCracha = _limparCodigo(codigo);
 
+    final empresaId = context.read<UsuarioProvider>().usuario?.empresaId ?? '';
     final item = await context.read<ItemOsProvider>().buscarItemPorCracha(
       widget.osId,
       idCracha,
-      'aguardando_lixa',
+      'aguardando_lixa', empresaId,
     );
 
     if (item != null) {
@@ -94,11 +99,15 @@ class _TelaEstacaoLixaState extends State<TelaEstacaoLixa> {
 
   @override
   Widget build(BuildContext context) {
+    final empresaId = context.read<UsuarioProvider>().usuario?.empresaId ?? '';
     return Scaffold(
       appBar: AppBar(
         title: const Text('Execução: Lixa/Jato'),
         backgroundColor: _corSetor,
         foregroundColor: Colors.white,
+        actions: const [
+          SeletorOperador(estacao: EstacaoProducao.lixa),
+        ],
       ),
       body: Column(
         children: [
@@ -116,7 +125,7 @@ class _TelaEstacaoLixaState extends State<TelaEstacaoLixa> {
             child: StreamBuilder<List<Map<String, dynamic>>>(
               stream: context
                   .read<ItemOsProvider>()
-                  .streamItensPorOsEStatus(widget.osId, 'aguardando_lixa'),
+                  .streamItensPorOsEStatus(widget.osId, 'aguardando_lixa', empresaId),
               builder: (context, snapshot) {
                 if (!snapshot.hasData) {
                   return const Center(child: CircularProgressIndicator());

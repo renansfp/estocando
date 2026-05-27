@@ -16,14 +16,24 @@ class TelaListaLotesMontagem extends StatelessWidget {
       statusAguardando: 'aguardando_montagem',
       mensagemVazia: 'Nenhum extintor pendente de lacração.',
       textoSubtitulo: (passaram, total) =>
-          passaram == total ? 'Pronto para Expedição' : 'Processando lacração...',
-      streamFonte: (repo) => repo.streamItensEmProducao(),
-      // Considera concluído quando o item já saiu para expedição ou foi finalizado
+      passaram == total ? 'Pronto para Expedição' : 'Processando lacração...',
+      streamFonte: (repo, empresaId) => repo.streamItensEmProducao(empresaId),
       contadorJaPassaram: (itens) => itens.where((doc) {
         final st = doc['status']?.toString().toLowerCase().replaceAll('_', '') ?? '';
         return st == 'aguardandoexpedicao' || st == 'finalizado';
       }).length,
       construtorTela: (osId) => TelaEstacaoMontagem(osId: osId),
+      // ── Novos recursos ──────────────────────────────────────────
+      mostrarNomeCliente: true,
+      mostrarBotaoRequisicao: true,
+      nomeSetorCC: 'MONTAGEM', // → CC 4224
+      mostrarBotaoReverter: true,
+      statusParaReverter: 'aguardando_montagem',
+      statusAnteriorReverter: 'aguardando_premontagem',
+      etapaAnteriorOS: 'premontagem',
+      statusLoteAnteriorOS: 'em_premontagem',
+      mensagemReverter:
+      'Deseja devolver este lote inteiro para a etapa de PRÉ-MONTAGEM?',
     );
   }
 }

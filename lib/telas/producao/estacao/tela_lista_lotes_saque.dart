@@ -18,7 +18,7 @@ class TelaListaLotesSaque extends StatelessWidget {
       textoSubtitulo: (passaram, total) => passaram == total
           ? 'Lote completo para saque'
           : 'Aguardando itens do lote...',
-      streamFonte: (repo) => repo.streamItensPorRoteiro('saque_valvula'),
+      streamFonte: (repo, empresaId) => repo.streamItensEmProducao(empresaId),
       contadorJaPassaram: (itens) => itens.where((doc) {
         final st = doc['status']?.toString() ?? '';
         return st != 'aguardando_limpeza' &&
@@ -28,6 +28,17 @@ class TelaListaLotesSaque extends StatelessWidget {
       }).length,
       // Nota: TelaEstacaoSaque usa 'numeroLote' em vez de 'osId'
       construtorTela: (osId) => TelaEstacaoSaque(numeroLote: osId),
+      // ── Novos recursos ──────────────────────────────────────────
+      mostrarNomeCliente: true,
+      mostrarBotaoRequisicao: true,
+      nomeSetorCC: 'MANUTENÇÃO DE COMPONENTES', // → CC 4224 (setor mais próximo)
+      mostrarBotaoReverter: true,
+      statusParaReverter: 'aguardando_saque_valvula',
+      statusAnteriorReverter: 'aguardando_manutencao_valvula',
+      etapaAnteriorOS: 'manutencao_valvula',
+      statusLoteAnteriorOS: 'em_manutencao_valvula',
+      mensagemReverter:
+      'Deseja devolver este lote inteiro para a etapa de MANUTENÇÃO DE COMPONENTES?',
     );
   }
 }

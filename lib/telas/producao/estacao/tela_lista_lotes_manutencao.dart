@@ -31,7 +31,7 @@ class TelaListaLotesManutencao extends StatelessWidget {
       textoSubtitulo: (passaram, total) => passaram == total
           ? 'Todos os componentes revisados'
           : 'Revisando componentes do lote...',
-      streamFonte: (repo) => repo.streamItensPorRoteiro('manutencao_valvula'),
+      streamFonte: (repo, empresaId) => repo.streamItensEmProducao(empresaId),
       contadorJaPassaram: (itens) => itens.where((doc) {
         final st = doc['status']?.toString() ?? '';
         return st != 'aguardando_limpeza' &&
@@ -43,6 +43,17 @@ class TelaListaLotesManutencao extends StatelessWidget {
         estacaoNome: 'Manutenção de Componentes',
         osId: osId,
       ),
+      // ── Novos recursos ──────────────────────────────────────────
+      mostrarNomeCliente: true,
+      mostrarBotaoRequisicao: true,
+      nomeSetorCC: 'MANUTENÇÃO DE COMPONENTES', // → CC 4224
+      mostrarBotaoReverter: true,
+      statusParaReverter: 'aguardando_manutencao_valvula',
+      statusAnteriorReverter: 'aguardando_lixa',
+      etapaAnteriorOS: 'lixa',
+      statusLoteAnteriorOS: 'em_lixa',
+      mensagemReverter:
+      'Deseja devolver este lote inteiro para a etapa de LIXA?',
     );
   }
 }

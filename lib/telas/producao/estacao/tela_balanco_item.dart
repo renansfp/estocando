@@ -4,8 +4,11 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:protecin_producao/models/equipamento.dart';
+import 'package:protecin_producao/models/usuario.dart';
 import 'package:protecin_producao/provider/equipamento_provider.dart';
 import 'package:protecin_producao/provider/item_os_provider.dart';
+import 'package:protecin_producao/provider/usuario_provider.dart';
+import 'package:protecin_producao/widgets/seletor_operador.dart';
 
 class TelaBalancoItem extends StatefulWidget {
   final String idRastreio;
@@ -31,9 +34,10 @@ class _TelaBalancoItemState extends State<TelaBalancoItem> {
   Future<void> _confirmarDescarga() async {
     setState(() => _isSaving = true);
     try {
+      final operador = context.read<UsuarioProvider>().operadorAtivo?.nome ?? 'Operador';
       await context
           .read<ItemOsProvider>()
-          .confirmarDescargaItem(widget.itemOsId);
+          .confirmarDescargaItem(widget.itemOsId, operador);
 
       if (mounted) Navigator.pop(context);
     } catch (e) {
@@ -54,6 +58,7 @@ class _TelaBalancoItemState extends State<TelaBalancoItem> {
         backgroundColor: Colors.blueGrey.shade800,
         foregroundColor: Colors.white,
         actions: [
+          const SeletorOperador(estacao: EstacaoProducao.descarga),
           IconButton(
             icon: const Icon(Icons.home),
             onPressed: () =>

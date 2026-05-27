@@ -18,7 +18,7 @@ class TelaListaLotesValvulaPo extends StatelessWidget {
       mostrarBotaoHome: true,
       statusAguardando: 'aguardando_manutencao_valvula_po',
       mensagemVazia: 'Nenhum extintor de pó aguardando válvula.',
-      streamFonte: (repo) => repo.streamItensPorRoteiro('manutencao_valvula_po'),
+      streamFonte: (repo, empresaId) => repo.streamItensEmProducao(empresaId),
       contadorJaPassaram: (itens) => itens.where((doc) {
         final st = doc['status']?.toString() ?? '';
         return st != 'aguardando_manutencao_valvula_po';
@@ -26,8 +26,19 @@ class TelaListaLotesValvulaPo extends StatelessWidget {
       // Mostra quantos FALTAM no avatar (total - passaram)
       textoAvatar: (passaram, total) => '${total - passaram}',
       textoSubtitulo: (passaram, total) =>
-          '${total - passaram} de $total itens aguardando válvula',
+      '${total - passaram} de $total itens aguardando válvula',
       construtorTela: (osId) => TelaEstacaoValvulaPo(osId: osId),
+      // ── Novos recursos ──────────────────────────────────────────
+      mostrarNomeCliente: true,
+      mostrarBotaoRequisicao: true,
+      nomeSetorCC: 'MANUTENÇÃO DE COMPONENTES', // → CC 4224
+      mostrarBotaoReverter: true,
+      statusParaReverter: 'aguardando_manutencao_valvula_po',
+      statusAnteriorReverter: 'aguardando_lixa',
+      etapaAnteriorOS: 'lixa',
+      statusLoteAnteriorOS: 'em_lixa',
+      mensagemReverter:
+      'Deseja devolver este lote inteiro para a etapa de LIXA?',
     );
   }
 }

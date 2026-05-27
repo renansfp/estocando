@@ -17,7 +17,10 @@ abstract class ProdutoRepository {
 
   /// Busca um produto pelo código mestre sem filtro de empresa.
   /// Usado na execução de recarga.
-  Future<Map<String, dynamic>?> buscarPorCodigo(String codigo);
+  /// [empresaId] é obrigatório — garante que o produto retornado pertence
+  /// à empresa correta. Nunca chamar sem ele.
+  Future<Map<String, dynamic>?> buscarPorCodigo(
+      String empresaId, String codigo);
 
   /// Stream dos lotes de um produto específico.
   Stream<List<Map<String, dynamic>>> streamLotesPorProduto(String produtoId);

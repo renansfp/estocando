@@ -22,19 +22,27 @@ class TelaListaLotesPremontagem extends StatelessWidget {
     return TelaListaLotesBase(
       titulo: 'Fila: Pré-Montagem',
       corSetor: Colors.indigo.shade700,
-      // Ícone no avatar em vez de contador (relógio = aguardando, check = pronto)
       iconeAvatar: Icons.pending_actions,
       statusAguardando: 'aguardando_premontagem', // referência, substituído pelo filtroOS
-      // filtroOS customizado: mostra a OS se qualquer item tem status de premontagem
       filtroOS: (itens) => itens.any(_estaEmPremontagem),
       mensagemVazia: 'Nenhum lote pendente para montagem.',
       textoSubtitulo: (passaram, total) => passaram == total
           ? 'LOTE COMPLETO — PRONTO PARA MONTAR'
           : 'Aguardando itens da estanqueidade ($passaram/$total)',
-      streamFonte: (repo) => repo.streamItensEmProducao(),
-      // Conta quantos itens JÁ chegaram à pré-montagem
+      streamFonte: (repo, empresaId) => repo.streamItensEmProducao(empresaId),
       contadorJaPassaram: (itens) => itens.where(_estaEmPremontagem).length,
       construtorTela: (osId) => TelaEstacaoPremontagem(osId: osId),
+      // ── Novos recursos ──────────────────────────────────────────
+      mostrarNomeCliente: true,
+      mostrarBotaoRequisicao: true,
+      nomeSetorCC: '', // sem CC direto — usuário preenche manualmente se precisar
+      mostrarBotaoReverter: true,
+      statusParaReverter: 'aguardando_premontagem',
+      statusAnteriorReverter: 'aguardando_estanqueidade',
+      etapaAnteriorOS: 'estanqueidade',
+      statusLoteAnteriorOS: 'em_estanqueidade',
+      mensagemReverter:
+      'Deseja devolver este lote inteiro para a etapa de ESTANQUEIDADE?',
     );
   }
 }

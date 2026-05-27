@@ -4,8 +4,11 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:protecin_producao/models/equipamento.dart';
+import 'package:protecin_producao/models/usuario.dart';
 import 'package:protecin_producao/provider/equipamento_provider.dart';
 import 'package:protecin_producao/provider/item_os_provider.dart';
+import 'package:protecin_producao/provider/usuario_provider.dart';
+import 'package:protecin_producao/widgets/seletor_operador.dart';
 
 class TelaTriagemLimpeza extends StatefulWidget {
   final String itemOsId;
@@ -141,6 +144,7 @@ class _TelaTriagemLimpezaState extends State<TelaTriagemLimpeza> {
       roteiroFinal[roteiroFinal.indexOf('limpeza') + 1];
       final proximoStatus = 'aguardando_$proximaEstacao';
 
+      final operador = context.read<UsuarioProvider>().operadorAtivo?.nome ?? 'Operador';
       await context.read<ItemOsProvider>().confirmarTriagem(
         itemId: widget.itemOsId,
         osId: widget.osId,
@@ -149,6 +153,7 @@ class _TelaTriagemLimpezaState extends State<TelaTriagemLimpeza> {
         proximaEstacao: proximaEstacao,
         precisaPintura: _precisaPintura,
         testeVencido: _testeVencidoReal,
+        operador: operador,
       );
 
       if (mounted) Navigator.pop(context);
@@ -169,6 +174,9 @@ class _TelaTriagemLimpezaState extends State<TelaTriagemLimpeza> {
         title: const Text('Triagem Técnica'),
         backgroundColor: _corPrincipal,
         foregroundColor: Colors.white,
+        actions: const [
+          SeletorOperador(estacao: EstacaoProducao.limpeza),
+        ],
       ),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())

@@ -3,35 +3,20 @@
 import 'dart:math';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:protecin_producao/repositories/produto_repository.dart';
+import 'package:protecin_producao/utils/firestore_utils.dart';
 
 class FirestoreProdutoRepository implements ProdutoRepository {
   final FirebaseFirestore _db = FirebaseFirestore.instance;
 
   // Converte todos os Timestamp do Firestore para DateTime antes de entregar
   // para as telas. Assim nenhuma tela precisa importar cloud_firestore.
-  Map<String, dynamic> _convertTimestamps(Map<String, dynamic> data) {
-    return data.map((key, value) {
-      if (value is Timestamp) return MapEntry(key, value.toDate());
-      if (value is Map<String, dynamic>) {
-        return MapEntry(key, _convertTimestamps(value));
-      }
-      if (value is List) {
-        return MapEntry(key, value.map((e) {
-          if (e is Timestamp) return e.toDate();
-          if (e is Map<String, dynamic>) return _convertTimestamps(e);
-          return e;
-        }).toList());
-      }
-      return MapEntry(key, value);
-    });
-  }
 
   Map<String, dynamic> _toMap(DocumentSnapshot doc) {
     final raw = <String, dynamic>{
       'id': doc.id,
       ...(doc.data() as Map<String, dynamic>? ?? {}),
     };
-    return _convertTimestamps(raw);
+    return convertTimestamps(raw);
   }
 
   @override
@@ -85,9 +70,11 @@ class FirestoreProdutoRepository implements ProdutoRepository {
   }
 
   @override
-  Future<Map<String, dynamic>?> buscarPorCodigo(String codigo) async {
+  Future<Map<String, dynamic>?> buscarPorCodigo(
+      String empresaId, String codigo) async {
     final snap = await _db
         .collection('produtos')
+        .where('empresaId', isEqualTo: empresaId) // isolamento multi-empresa
         .where('codigo', isEqualTo: codigo)
         .limit(1)
         .get();

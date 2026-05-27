@@ -2,7 +2,11 @@ import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
+import 'package:protecin_producao/models/usuario.dart';
 import 'package:protecin_producao/provider/item_os_provider.dart';
+import 'package:protecin_producao/provider/usuario_provider.dart';
+import 'package:protecin_producao/widgets/dialog_pecas_trocadas.dart';
+import 'package:protecin_producao/widgets/seletor_operador.dart';
 import 'dart:typed_data';
 
 class TelaExecucaoMontagem extends StatefulWidget {
@@ -67,22 +71,36 @@ class _TelaExecucaoMontagemState extends State<TelaExecucaoMontagem> {
       return;
     }
 
+    final provider  = context.read<ItemOsProvider>();
+    final empresaId = context.read<UsuarioProvider>().usuario?.empresaId ?? '';
+
     setState(() => _carregando = true);
 
-    // Captura o provider antes de qualquer await — regra do BuildContext async
-    final provider = context.read<ItemOsProvider>();
-
     try {
-      // Aguarda a URL — se o upload já terminou, retorna instantaneamente
       final String urlFoto = await _uploadFuture!;
 
-      // Usa confirmarEtapa — sem Firestore direto
+      if (!mounted) return;
+      final pecasSelecionadas = await mostrarDialogPecasTrocadas(
+        context              : context,
+        legendasDisponiveis  : [2, 3, 5, 6, 7, 8, 11, 12, 19],
+        legendasObrigatorias : [],
+        tipoEquipamento      : widget.item['tipoAgente'] ?? '',
+        capacidadeEquipamento: widget.item['capacidade'] ?? '',
+        fabricanteEquipamento: widget.item['fabricante'] ?? '',
+      );
+
+      if (pecasSelecionadas == null) {
+        if (mounted) setState(() => _carregando = false);
+        return;
+      }
+
       await provider.confirmarEtapa(
         itemId: widget.item['id'],
         dadosItem: {
           'montagem_final': {
             'data': DateTime.now(),
             'fotoSeloUrl': urlFoto,
+            'operador': context.read<UsuarioProvider>().operadorAtivo?.nome ?? 'Operador',
           },
         },
         osId: widget.osId,
@@ -90,31 +108,31 @@ class _TelaExecucaoMontagemState extends State<TelaExecucaoMontagem> {
         proximaEstacao: 'expedicao',
       );
 
+      if (pecasSelecionadas.isNotEmpty) {
+        await provider.registrarPecasTrocadas(
+          itemId   : widget.item['id'],
+          osId     : widget.osId,
+          empresaId: empresaId,
+          pecas    : pecasSelecionadas,
+        );
+      }
+
       if (mounted) {
         Navigator.pop(context);
         _notificar('Montagem finalizada!', Colors.green);
       }
     } catch (e) {
-      // Se o upload falhou por algum motivo, tenta de novo agora
       if (_bytesImagem != null) {
         try {
           final urlFoto = await _iniciarUpload(_bytesImagem!);
           await provider.confirmarEtapa(
             itemId: widget.item['id'],
-            dadosItem: {
-              'montagem_final': {
-                'data': DateTime.now(),
-                'fotoSeloUrl': urlFoto,
-              },
-            },
+            dadosItem: {'montagem_final': {'data': DateTime.now(), 'fotoSeloUrl': urlFoto, 'operador': context.read<UsuarioProvider>().operadorAtivo?.nome ?? 'Operador'}},
             osId: widget.osId,
             statusPendente: 'aguardando_montagem',
             proximaEstacao: 'expedicao',
           );
-          if (mounted) {
-            Navigator.pop(context);
-            _notificar('Montagem finalizada!', Colors.green);
-          }
+          if (mounted) { Navigator.pop(context); _notificar('Montagem finalizada!', Colors.green); }
           return;
         } catch (_) {}
       }
@@ -139,6 +157,9 @@ class _TelaExecucaoMontagemState extends State<TelaExecucaoMontagem> {
         title: const Text('Registrar Selo Inmetro'),
         backgroundColor: Colors.deepPurple.shade700,
         foregroundColor: Colors.white,
+        actions: const [
+          SeletorOperador(estacao: EstacaoProducao.montagem),
+        ],
       ),
       body: Column(
         children: [

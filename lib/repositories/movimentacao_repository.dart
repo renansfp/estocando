@@ -1,7 +1,7 @@
 // lib/repositories/movimentacao_repository.dart
 
 abstract class MovimentacaoRepository {
-  Stream<List<Map<String, dynamic>>> streamMovimentacoesFiltradas(
+  Future<List<Map<String, dynamic>>> buscarMovimentacoesFiltradas(
       String empresaId, {
         DateTime? dataInicio,
         DateTime? dataFim,
@@ -11,13 +11,16 @@ abstract class MovimentacaoRepository {
   Stream<List<Map<String, dynamic>>> streamMovimentacoesPorEmpresa(
       String empresaId, {int limit = 50});
 
-  Stream<List<Map<String, dynamic>>> streamMovimentacoesPorProduto(
+  Future<List<Map<String, dynamic>>> buscarMovimentacoesPorProduto(
       String empresaId, String produtoId);
 
-  Stream<List<Map<String, dynamic>>> streamMovimentacoesPorLote(
+  Future<List<Map<String, dynamic>>> buscarMovimentacoesPorLote(
       String empresaId, String loteId);
 
-  Future<List<Map<String, dynamic>>> buscarTodosPorEmpresa(String empresaId);
+  /// [limit] opcional — passar um valor para limitar leituras em telas de
+  /// consulta rápida. Omitir (null) apenas quando precisar de todos os registros,
+  /// como em exportações de relatório.
+  Future<List<Map<String, dynamic>>> buscarTodosPorEmpresa(String empresaId, {int? limit});
 
   Future<void> excluirComEstorno({
     required String movimentacaoId,
@@ -37,7 +40,10 @@ abstract class MovimentacaoRepository {
     String? centroCusto,
   });
 
-  Future<void> resetarDadosEmpresa(String empresaId);
+  /// Apaga todas as movimentações e zera o estoque da empresa.
+  /// Restrito a admins — verificar perfil antes de chamar.
+  /// Grava log de auditoria em `auditoria/{docId}` com operador e timestamp.
+  Future<void> resetarDadosEmpresa(String empresaId, String operador);
 
   // ─── Novo método ─────────────────────────────────────────────────────────
 

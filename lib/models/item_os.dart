@@ -50,10 +50,16 @@ class HistoricoEtapa {
   factory HistoricoEtapa.fromJson(Map<String, dynamic> json) {
     return HistoricoEtapa(
       etapa: ItemOS._traduzirStatus(json['etapa']),
-      dataHora: (json['dataHora'] as Timestamp? ?? Timestamp.now()).toDate(),
+      dataHora: _toDateTime(json['dataHora']) ?? DateTime.now(),
       usuarioNome: json['usuarioNome'] ?? 'Usuário Desconhecido',
       observacao: json['observacao'],
     );
+  }
+  static DateTime? _toDateTime(dynamic v) {
+    if (v == null) return null;
+    if (v is DateTime) return v;
+    if (v is Timestamp) return v.toDate();
+    return null;
   }
 }
 

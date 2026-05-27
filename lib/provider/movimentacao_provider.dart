@@ -8,13 +8,13 @@ class MovimentacaoProvider with ChangeNotifier {
 
   MovimentacaoProvider(this._repository);
 
-  Stream<List<Map<String, dynamic>>> streamMovimentacoesFiltradas(
+  Future<List<Map<String, dynamic>>> buscarMovimentacoesFiltradas(
       String empresaId, {
         DateTime? dataInicio,
         DateTime? dataFim,
         String? tipo,
       }) =>
-      _repository.streamMovimentacoesFiltradas(
+      _repository.buscarMovimentacoesFiltradas(
         empresaId,
         dataInicio: dataInicio,
         dataFim: dataFim,
@@ -25,17 +25,17 @@ class MovimentacaoProvider with ChangeNotifier {
       String empresaId, {int limit = 50}) =>
       _repository.streamMovimentacoesPorEmpresa(empresaId, limit: limit);
 
-  Stream<List<Map<String, dynamic>>> streamMovimentacoesPorProduto(
+  Future<List<Map<String, dynamic>>> buscarMovimentacoesPorProduto(
       String empresaId, String produtoId) =>
-      _repository.streamMovimentacoesPorProduto(empresaId, produtoId);
+      _repository.buscarMovimentacoesPorProduto(empresaId, produtoId);
 
-  Stream<List<Map<String, dynamic>>> streamMovimentacoesPorLote(
+  Future<List<Map<String, dynamic>>> buscarMovimentacoesPorLote(
       String empresaId, String loteId) =>
-      _repository.streamMovimentacoesPorLote(empresaId, loteId);
+      _repository.buscarMovimentacoesPorLote(empresaId, loteId);
 
   Future<List<Map<String, dynamic>>> buscarTodosPorEmpresa(
-      String empresaId) =>
-      _repository.buscarTodosPorEmpresa(empresaId);
+      String empresaId, {int? limit}) =>
+      _repository.buscarTodosPorEmpresa(empresaId, limit: limit);
 
   Future<void> excluirComEstorno({
     required String movimentacaoId,
@@ -71,8 +71,8 @@ class MovimentacaoProvider with ChangeNotifier {
         centroCusto: centroCusto,
       );
 
-  Future<void> resetarDadosEmpresa(String empresaId) =>
-      _repository.resetarDadosEmpresa(empresaId);
+  Future<void> resetarDadosEmpresa(String empresaId, String operador) =>
+      _repository.resetarDadosEmpresa(empresaId, operador);
 
   // ─── Novo método ─────────────────────────────────────────────────────────
 

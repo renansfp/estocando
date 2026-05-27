@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:protecin_producao/models/usuario.dart';
 import 'package:protecin_producao/provider/item_os_provider.dart';
+import 'package:protecin_producao/provider/usuario_provider.dart';
+import 'package:protecin_producao/widgets/seletor_operador.dart';
 
 class TelaEstacaoValvula extends StatefulWidget {
   final String osId;
@@ -15,12 +18,13 @@ class _TelaEstacaoValvulaState extends State<TelaEstacaoValvula> {
 
   Future<void> _confirmarManutencao(Map<String, dynamic> item) async {
     try {
+      final operador = context.read<UsuarioProvider>().operadorAtivo?.nome ?? 'Operador';
       await context.read<ItemOsProvider>().confirmarEtapa(
         itemId: item['id'],
         dadosItem: {
           'valvula_manutencao': {
             'data': DateTime.now(),
-            'operador': 'operador_valvula',
+            'operador': operador,
           }
         },
         osId: widget.osId,
@@ -46,16 +50,20 @@ class _TelaEstacaoValvulaState extends State<TelaEstacaoValvula> {
 
   @override
   Widget build(BuildContext context) {
+    final empresaId = context.read<UsuarioProvider>().usuario?.empresaId ?? '';
     return Scaffold(
       appBar: AppBar(
         title: const Text('Execução: Manutenção de Válvula'),
         backgroundColor: _corSetor,
         foregroundColor: Colors.white,
+        actions: const [
+          SeletorOperador(estacao: EstacaoProducao.manutencao),
+        ],
       ),
       body: StreamBuilder<List<Map<String, dynamic>>>(
         stream: context
             .read<ItemOsProvider>()
-            .streamItensPorOsEStatus(widget.osId, 'aguardando_manutencao_valvula'),
+            .streamItensPorOsEStatus(widget.osId, 'aguardando_manutencao_valvula', empresaId),
         builder: (context, snapshot) {
           if (!snapshot.hasData) {
             return const Center(child: CircularProgressIndicator());

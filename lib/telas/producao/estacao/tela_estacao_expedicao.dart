@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:protecin_producao/provider/item_os_provider.dart';
 import 'package:protecin_producao/widgets/campo_com_scanner.dart';
+import 'package:protecin_producao/provider/usuario_provider.dart';
 
 class TelaEstacaoExpedicao extends StatefulWidget {
   final String osId;
@@ -31,10 +32,11 @@ class _TelaEstacaoExpedicaoState extends State<TelaEstacaoExpedicao> {
     final provider = context.read<ItemOsProvider>();
 
     try {
+      final empresaId = context.read<UsuarioProvider>().usuario?.empresaId ?? '';
       final item = await provider.buscarItemPorCracha(
         widget.osId,
         idCracha,
-        'aguardando_expedicao',
+        'aguardando_expedicao', empresaId,
       );
 
       if (item != null) {

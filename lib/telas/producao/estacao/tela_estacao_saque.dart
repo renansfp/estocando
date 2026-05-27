@@ -2,11 +2,14 @@
 
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:protecin_producao/models/usuario.dart';
 import 'package:protecin_producao/provider/item_os_provider.dart';
+import 'package:protecin_producao/provider/usuario_provider.dart';
 import 'package:protecin_producao/widgets/botao_condenar.dart';
 import 'package:protecin_producao/widgets/campo_com_scanner.dart';
 import 'package:protecin_producao/telas/estoque/tela_criar_requisicao.dart';
 import 'package:protecin_producao/utils/mapeador_custos.dart';
+import 'package:protecin_producao/widgets/seletor_operador.dart';
 
 class TelaEstacaoSaque extends StatefulWidget {
   final String numeroLote;
@@ -29,11 +32,11 @@ class _TelaEstacaoSaqueState extends State<TelaEstacaoSaque> {
   Future<void> _processarBipe(String codigo) async {
     String idLimpo = _limparCodigo(codigo);
     _scannerController.clear();
-
+    final empresaId = context.read<UsuarioProvider>().usuario?.empresaId ?? '';
     final item = await context.read<ItemOsProvider>().buscarItemPorCracha(
       widget.numeroLote,
       idLimpo,
-      'aguardando_saque_valvula',
+      'aguardando_saque_valvula', empresaId
     );
 
     if (item != null) {
@@ -55,13 +58,14 @@ class _TelaEstacaoSaqueState extends State<TelaEstacaoSaque> {
       List<String>.from(item['roteiro'] ?? []);
       int indexAtual = roteiro.indexOf('saque_valvula');
       String proximaEstacao = roteiro[indexAtual + 1];
+      final operador = context.read<UsuarioProvider>().operadorAtivo?.nome ?? 'Operador';
 
       await context.read<ItemOsProvider>().confirmarEtapa(
         itemId: item['id'],
         dadosItem: {
           'saque': {
             'data': DateTime.now(),
-            'operador': 'operador_saque',
+            'operador': operador,
             'inspecoes': {'interna': true, 'rosca': true},
           }
         },
@@ -123,6 +127,7 @@ class _TelaEstacaoSaqueState extends State<TelaEstacaoSaque> {
 
   @override
   Widget build(BuildContext context) {
+    final empresaId = context.read<UsuarioProvider>().usuario?.empresaId ?? '';
     return Scaffold(
       appBar: AppBar(
         title: const Text('Execução: Saque'),
@@ -134,6 +139,7 @@ class _TelaEstacaoSaqueState extends State<TelaEstacaoSaque> {
               Navigator.of(context).popUntil((r) => r.isFirst),
         ),
         actions: [
+          const SeletorOperador(estacao: EstacaoProducao.saque),
           IconButton(
             icon: const Icon(Icons.shopping_cart_checkout),
             onPressed: () => Navigator.push(
@@ -166,7 +172,7 @@ class _TelaEstacaoSaqueState extends State<TelaEstacaoSaque> {
               stream: context
                   .read<ItemOsProvider>()
                   .streamItensPorOsEStatus(
-                  widget.numeroLote, 'aguardando_saque_valvula'),
+                  widget.numeroLote, 'aguardando_saque_valvula', empresaId),
               builder: (context, snapshot) {
                 if (!snapshot.hasData) {
                   return const Center(child: CircularProgressIndicator());

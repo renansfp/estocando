@@ -54,8 +54,14 @@ class OrdemServicoProvider with ChangeNotifier {
       String empresaId, String numeroOS) =>
       _repository.buscarPorNumero(empresaId, numeroOS);
 
-  Stream<List<Map<String, dynamic>>> streamTodasOrdenadas() =>
-      _repository.streamTodasOrdenadas();
+  Stream<List<Map<String, dynamic>>> streamTodasOrdenadas(
+      String empresaId, {
+        bool somentAbertas = false,
+      }) =>
+      _repository.streamTodasOrdenadas(empresaId, somentAbertas: somentAbertas);
+
+  Future<List<Map<String, dynamic>>> buscarOSAbertas(String empresaId) =>
+      _repository.buscarOSAbertas(empresaId);
 
   Stream<Map<String, dynamic>?> streamPorId(String osId) =>
       _repository.streamPorId(osId);

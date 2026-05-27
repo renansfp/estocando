@@ -5,6 +5,7 @@ import 'package:protecin_producao/widgets/campo_com_scanner.dart';
 import 'package:protecin_producao/telas/producao/estacao/tela_execucao_montagem.dart';
 import 'package:protecin_producao/telas/estoque/tela_criar_requisicao.dart';
 import 'package:protecin_producao/utils/mapeador_custos.dart';
+import 'package:protecin_producao/provider/usuario_provider.dart';
 
 class TelaEstacaoMontagem extends StatefulWidget {
   final String osId;
@@ -40,11 +41,11 @@ class _TelaEstacaoMontagemState extends State<TelaEstacaoMontagem> {
   Future<void> _processarBipe(String codigo) async {
     if (codigo.isEmpty) return;
     String idCracha = _limparCodigo(codigo);
-
+    final empresaId = context.read<UsuarioProvider>().usuario?.empresaId ?? '';
     final item = await context.read<ItemOsProvider>().buscarItemPorCracha(
       widget.osId,
       idCracha,
-      'aguardando_montagem',
+      'aguardando_montagem', empresaId,
     );
 
     if (item != null) {
@@ -62,6 +63,7 @@ class _TelaEstacaoMontagemState extends State<TelaEstacaoMontagem> {
 
   @override
   Widget build(BuildContext context) {
+    final empresaId = context.read<UsuarioProvider>().usuario?.empresaId ?? '';
     return Scaffold(
       appBar: AppBar(
         title: Text('Montagem Final: OS ${widget.osId}'),
@@ -112,7 +114,7 @@ class _TelaEstacaoMontagemState extends State<TelaEstacaoMontagem> {
             child: StreamBuilder<List<Map<String, dynamic>>>(
               stream: context
                   .read<ItemOsProvider>()
-                  .streamItensPorOsEStatus(widget.osId, 'aguardando_montagem'),
+                  .streamItensPorOsEStatus(widget.osId, 'aguardando_montagem', empresaId),
               builder: (context, snapshot) {
                 if (!snapshot.hasData) {
                   return const Center(child: CircularProgressIndicator());

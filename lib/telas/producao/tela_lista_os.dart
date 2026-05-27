@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 import 'package:protecin_producao/provider/ordem_servico_provider.dart';
+import 'package:protecin_producao/provider/usuario_provider.dart';
 import 'package:protecin_producao/telas/producao/tela_criar_os.dart';
 import 'package:protecin_producao/telas/producao/tela_detalhe_os.dart';
 
@@ -85,9 +86,14 @@ class _TelaListaOSState extends State<TelaListaOS> {
           // Lista de OS
           Expanded(
             child: StreamBuilder<List<Map<String, dynamic>>>(
+              // somentAbertas: true filtra no Firestore quando o usuário
+              // oculta finalizadas — evita baixar todas as OS do banco.
               stream: context
                   .read<OrdemServicoProvider>()
-                  .streamTodasOrdenadas(),
+                  .streamTodasOrdenadas(
+                context.read<UsuarioProvider>().usuario?.empresaId ?? '',
+                somentAbertas: _ocultarFinalizadas,
+              ),
               builder: (context, snapshot) {
                 if (snapshot.hasError) {
                   return Center(child: Text('Erro: ${snapshot.error}'));
@@ -98,7 +104,9 @@ class _TelaListaOSState extends State<TelaListaOS> {
 
                 var lista = snapshot.data!;
 
-                // Filtro em memória por texto e status
+                // Filtro em memória apenas por texto (cliente ou nº OS).
+                // O filtro de finalizadas já ocorre no Firestore via
+                // somentAbertas — não precisa repetir aqui.
                 if (_textoBusca.isNotEmpty) {
                   lista = lista.where((os) {
                     final cliente =
@@ -110,13 +118,6 @@ class _TelaListaOSState extends State<TelaListaOS> {
                   }).toList();
                 }
 
-                if (_ocultarFinalizadas) {
-                  lista = lista.where((os) {
-                    final status =
-                    (os['statusLote'] ?? '').toString();
-                    return !status.contains('finaliz');
-                  }).toList();
-                }
 
                 if (lista.isEmpty) {
                   return const Center(child: Text('Nenhuma OS encontrada.'));

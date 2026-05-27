@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:protecin_producao/models/usuario.dart';
 import 'package:protecin_producao/provider/item_os_provider.dart';
 import 'package:protecin_producao/provider/usuario_provider.dart';
 import 'package:protecin_producao/telas/estoque/tela_criar_requisicao.dart';
 import 'package:protecin_producao/utils/mapeador_custos.dart';
+import 'package:protecin_producao/widgets/seletor_operador.dart';
 
 class TelaEstacaoPremontagem extends StatefulWidget {
   final String osId;
@@ -156,6 +158,7 @@ class _TelaEstacaoPremontagemState extends State<TelaEstacaoPremontagem> {
           onPressed: () => Navigator.of(context).popUntil((r) => r.isFirst),
         ),
         actions: [
+          const SeletorOperador(estacao: EstacaoProducao.premontagem),
           IconButton(
             icon: const Icon(Icons.inventory_2),
             onPressed: () => Navigator.push(

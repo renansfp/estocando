@@ -40,13 +40,13 @@ class EquipamentoProvider with ChangeNotifier {
     );
   }
 
-  void iniciarEscutaPorCliente(String clienteId) {
+  void iniciarEscutaPorCliente(String clienteId, String empresaId) {
     _subscription?.cancel();
     _isLoading = true;
     _erro = null;
     notifyListeners();
 
-    _subscription = _repository.listarPorCliente(clienteId).listen(
+    _subscription = _repository.listarPorCliente(clienteId, empresaId).listen(
           (lista) {
         _equipamentos = lista;
         _isLoading = false;

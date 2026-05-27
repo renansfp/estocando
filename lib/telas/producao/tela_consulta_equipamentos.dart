@@ -18,26 +18,35 @@ class TelaConsultaEquipamentos extends StatefulWidget {
 }
 
 class _TelaConsultaEquipamentosState extends State<TelaConsultaEquipamentos> {
+  EquipamentoProvider? _equipamentoProvider;
   Parceiro? _clienteSelecionado;
   final TextEditingController _filtroLocalController = TextEditingController();
   String _filtroLocal = '';
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _equipamentoProvider = context.read<EquipamentoProvider>();
+  }
+
+  @override
   void dispose() {
-    context.read<EquipamentoProvider>().pararEscuta();
+    _equipamentoProvider?.pararEscuta();
     _filtroLocalController.dispose();
     super.dispose();
   }
 
   void _onClienteSelecionado(Parceiro? p) {
     if (p == null) return;
+    final empresaId = context.read<UsuarioProvider>().usuario?.empresaId ?? '';
     setState(() {
       _clienteSelecionado = p;
       _filtroLocal = '';
       _filtroLocalController.clear();
     });
-    context.read<EquipamentoProvider>().iniciarEscutaPorCliente(p.id);
+    context.read<EquipamentoProvider>().iniciarEscutaPorCliente(p.id, empresaId);
   }
+
 
   // --- ALERTA DE VENCIMENTO DE RECARGA (mantido igual) ---
   Widget _buildAlertaRecarga(Equipamento equip) {

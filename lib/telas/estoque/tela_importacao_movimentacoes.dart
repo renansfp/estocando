@@ -184,6 +184,19 @@ class _TelaImportacaoMovimentacoesState
   Future<void> _resetarDados() async {
     if (_empresaSelecionada == null) return;
 
+    // Verificação de perfil — somente admin pode executar esta operação
+    final usuarioProvider = context.read<UsuarioProvider>();
+    final usuario = usuarioProvider.usuario;
+    if (usuario == null || !usuario.isAdmin) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Acesso negado. Apenas administradores podem redefinir dados.'),
+        backgroundColor: Colors.red,
+      ));
+      return;
+    }
+
+    final operador = usuarioProvider.operadorAtivo?.nome ?? usuario.nome;
+
     setState(() {
       _isLoading = true;
       _log =
@@ -195,7 +208,7 @@ class _TelaImportacaoMovimentacoesState
 
       await context
           .read<MovimentacaoProvider>()
-          .resetarDadosEmpresa(_empresaSelecionada!['id']!);
+          .resetarDadosEmpresa(_empresaSelecionada!['id']!, operador);
 
       setState(() {
         _isLoading = false;

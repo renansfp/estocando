@@ -1,11 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:protecin_producao/models/equipamento.dart';
+import 'package:protecin_producao/models/usuario.dart';
 import 'package:protecin_producao/provider/equipamento_provider.dart';
 import 'package:protecin_producao/provider/item_os_provider.dart';
 import 'package:protecin_producao/widgets/campo_com_scanner.dart';
 import 'package:protecin_producao/telas/estoque/tela_criar_requisicao.dart';
 import 'package:protecin_producao/utils/mapeador_custos.dart';
+import 'package:protecin_producao/provider/usuario_provider.dart';
+import 'package:protecin_producao/widgets/dialog_pecas_trocadas.dart';
+import 'package:protecin_producao/widgets/seletor_operador.dart';
 
 class TelaEstacaoManutencaoValvula extends StatefulWidget {
   final String usuarioNome;
@@ -91,10 +95,11 @@ class _TelaEstacaoManutencaoValvulaState
 
     try {
       // Busca o item via provider
+      final empresaId = context.read<UsuarioProvider>().usuario?.empresaId ?? '';
       final item = await itemOsProvider.buscarItemPorCracha(
         widget.osId,
         idLimpo,
-        'aguardando_manutencao_valvula',
+        'aguardando_manutencao_valvula', empresaId,
       );
 
       if (item != null) {
@@ -130,6 +135,25 @@ class _TelaEstacaoManutencaoValvulaState
       return;
     }
 
+    // ── Captura providers ANTES de qualquer await ──────────────────────────
+    final itemOsProvider  = context.read<ItemOsProvider>();
+    final empresaId       = context.read<UsuarioProvider>().usuario?.empresaId ?? '';
+
+    // ── Abre o dialog de peças ─────────────────────────────────────────────
+    final pecasSelecionadas = await mostrarDialogPecasTrocadas(
+      context               : context,
+      // Peças disponíveis na manutenção de válvula CO₂
+      legendasDisponiveis   : [1, 9, 13, 15, 26],
+      // O-ring e Pera sempre trocados
+      legendasObrigatorias  : [13, 15],
+      tipoEquipamento       : _equipamentoAtual!.tipo,
+      capacidadeEquipamento : _equipamentoAtual!.capacidade,
+      fabricanteEquipamento : _equipamentoAtual!.fabricante,
+    );
+
+    // Operador cancelou
+    if (pecasSelecionadas == null) return;
+
     setState(() => _processando = true);
     try {
       final List<String> roteiro =
@@ -141,20 +165,31 @@ class _TelaEstacaoManutencaoValvulaState
       }
       String proximaEstacao = roteiro[indexAtual + 1];
 
-      await context.read<ItemOsProvider>().salvarManutencaoValvula(
-        itemId: _itemOsAtual!['id'],
-        osId: widget.osId,
-        equipamentoId: _equipamentoAtual!.id,
-        operador: widget.usuarioNome,
-        pesoVazio: _pesoVazioController.text,
-        pesoCheioMeta: _pesoCheioController.text,
+      // ── Salva pesagem e avança etapa ──────────────────────────────────────
+      await itemOsProvider.salvarManutencaoValvula(
+        itemId        : _itemOsAtual!['id'],
+        osId          : widget.osId,
+        equipamentoId : _equipamentoAtual!.id,
+        operador      : context.read<UsuarioProvider>().operadorAtivo?.nome ?? widget.usuarioNome,
+        pesoVazio     : _pesoVazioController.text,
+        pesoCheioMeta : _pesoCheioController.text,
         proximaEstacao: proximaEstacao,
       );
+
+      // ── Registra peças e baixa estoque ────────────────────────────────────
+      if (pecasSelecionadas.isNotEmpty) {
+        await itemOsProvider.registrarPecasTrocadas(
+          itemId    : _itemOsAtual!['id'],
+          osId      : widget.osId,
+          empresaId : empresaId,
+          pecas     : pecasSelecionadas,
+        );
+      }
 
       if (mounted) {
         setState(() {
           _equipamentoAtual = null;
-          _itemOsAtual = null;
+          _itemOsAtual      = null;
           _controllerEtiqueta.clear();
         });
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
@@ -174,6 +209,7 @@ class _TelaEstacaoManutencaoValvulaState
 
   @override
   Widget build(BuildContext context) {
+    final empresaId = context.read<UsuarioProvider>().usuario?.empresaId ?? '';
     return Scaffold(
       appBar: AppBar(
         title: const Text('Bancada Válvula'),
@@ -185,6 +221,7 @@ class _TelaEstacaoManutencaoValvulaState
               Navigator.of(context).popUntil((r) => r.isFirst),
         ),
         actions: [
+          const SeletorOperador(estacao: EstacaoProducao.manutencao),
           IconButton(
             icon: const Icon(Icons.inventory_2),
             onPressed: () => Navigator.push(
@@ -306,7 +343,7 @@ class _TelaEstacaoManutencaoValvulaState
                       stream: context
                           .read<ItemOsProvider>()
                           .streamItensPorOsEStatus(
-                          widget.osId, 'aguardando_manutencao_valvula'),
+                          widget.osId, 'aguardando_manutencao_valvula', empresaId),
                       builder: (context, snapshot) {
                         if (!snapshot.hasData) return const SizedBox.shrink();
                         final itens = snapshot.data!;

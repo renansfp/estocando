@@ -14,7 +14,7 @@ class TelaListaLotesTH extends StatelessWidget {
       corSetor: Colors.purple.shade700,
       statusAguardando: 'aguardando_th',
       mensagemVazia: 'Nenhum extintor pendente de TH.',
-      streamFonte: (repo) => repo.streamItensPorRoteiro('th'),
+      streamFonte: (repo, empresaId) => repo.streamItensEmProducao(empresaId),
       contadorJaPassaram: (itens) => itens.where((doc) {
         final st = doc['status']?.toString() ?? '';
         return st != 'aguardando_limpeza' &&
@@ -23,6 +23,17 @@ class TelaListaLotesTH extends StatelessWidget {
       }).length,
       // Nota: TelaEstacaoTH usa o parâmetro 'osIdAtual' em vez de 'osId'
       construtorTela: (osId) => TelaEstacaoTH(osIdAtual: osId),
+      // ── Novos recursos ──────────────────────────────────────────
+      mostrarNomeCliente: true,
+      mostrarBotaoRequisicao: true,
+      nomeSetorCC: 'TESTE HIDROSTÁTICO EXTINTORES', // → CC 4231
+      mostrarBotaoReverter: true,
+      statusParaReverter: 'aguardando_th',
+      statusAnteriorReverter: 'aguardando_lixa',
+      etapaAnteriorOS: 'lixa',
+      statusLoteAnteriorOS: 'em_lixa',
+      mensagemReverter:
+      'Deseja devolver este lote inteiro para a etapa de LIXA?',
     );
   }
 }

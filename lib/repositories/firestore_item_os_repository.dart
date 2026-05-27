@@ -1,141 +1,48 @@
 // lib/repositories/firestore_item_os_repository.dart
 
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter/foundation.dart';
 import 'package:protecin_producao/repositories/item_os_repository.dart';
+import 'package:protecin_producao/utils/firestore_utils.dart';
 
 class FirestoreItemOsRepository implements ItemOsRepository {
   final FirebaseFirestore _db = FirebaseFirestore.instance;
 
   // Converte todos os Timestamp do Firestore para DateTime antes de entregar
   // para as telas. Assim nenhuma tela precisa importar cloud_firestore.
-  Map<String, dynamic> _convertTimestamps(Map<String, dynamic> data) {
-    return data.map((key, value) {
-      if (value is Timestamp) return MapEntry(key, value.toDate());
-      if (value is Map<String, dynamic>) {
-        return MapEntry(key, _convertTimestamps(value));
-      }
-      if (value is List) {
-        return MapEntry(key, value.map((e) {
-          if (e is Timestamp) return e.toDate();
-          if (e is Map<String, dynamic>) return _convertTimestamps(e);
-          return e;
-        }).toList());
-      }
-      return MapEntry(key, value);
-    });
-  }
 
   Map<String, dynamic> _toMap(DocumentSnapshot doc) {
     final raw = <String, dynamic>{
       'id': doc.id,
       ...(doc.data() as Map<String, dynamic>? ?? {}),
     };
-    return _convertTimestamps(raw);
+    return convertTimestamps(raw);
   }
 
   @override
-  Stream<Map<String, int>> streamContadoresDashboard(String empresaId) {
+  Stream<Map<String, int>> streamDocumentoContadores(String empresaId) {
     return _db
-        .collection('itens_os')
-        .where('empresaId', isEqualTo: empresaId) // isola dados por empresa
-        .where('statusAtual', isEqualTo: 'emProducao')
+        .collection('contadores')
+        .doc(empresaId)
         .snapshots()
-        .map(_calcularContadores);
-  }
-
-  // Recebe o snapshot do Firestore e devolve o mapa de contadores.
-  // Antes essa lógica estava dentro do _iniciarOuvinteDashboard() na home_screen.
-  Map<String, int> _calcularContadores(QuerySnapshot snapshot) {
-    int desc = 0, limp = 0, lixa = 0, manut = 0, saque = 0, pint = 0;
-    int rec = 0, estanque = 0, premont = 0, mont = 0, test = 0;
-    int valvulaPo = 0, expedicao = 0;
-    int dABC = 0, dBC = 0, dAgua = 0, dCO2 = 0;
-    int rABC = 0, rBC = 0, rAgua = 0, rCO2 = 0;
-    int eABC = 0, eBC = 0, eAgua = 0, eCO2 = 0;
-
-    for (final doc in snapshot.docs) {
-      final data = doc.data() as Map<String, dynamic>;
-      final String statusRaw =
-          data['status']?.toString().toLowerCase().replaceAll('_', '') ?? '';
-      final String agente =
-          data['tipoAgente']?.toString().toUpperCase() ?? '';
-
-      if (statusRaw == 'aguardandodescarga') {
-        desc++;
-        if (agente == 'ABC') dABC++;
-        else if (agente == 'BC' || agente == 'PQS') dBC++;
-        else if (agente == 'CO2') dCO2++;
-        else if (['AP', 'ESP', 'AGUA'].contains(agente)) dAgua++;
+        .map((doc) {
+      if (!doc.exists) {
+        debugPrint(
+            'streamDocumentoContadores: documento contadores/$empresaId não existe ainda.');
+        return <String, int>{};
       }
-      if (statusRaw == 'aguardandolimpeza') limp++;
-      if (statusRaw == 'aguardandolixa') lixa++;
-      if (statusRaw == 'aguardandomanutencaovalvula') manut++;
-      if (statusRaw == 'aguardandosaquevalvula') saque++;
-      if (statusRaw == 'aguardandopintura') pint++;
-      if (statusRaw.contains('aguardandorecarga')) {
-        rec++;
-        if (agente == 'ABC') rABC++;
-        else if (agente == 'BC' || agente == 'PQS') rBC++;
-        else if (['AP', 'ESP', 'AGUA'].contains(agente)) rAgua++;
-        else if (agente == 'CO2') rCO2++;
-      }
-      if (statusRaw.contains('aguardandoestanqueidade')) {
-        estanque++;
-        if (agente == 'ABC') eABC++;
-        else if (agente == 'BC' || agente == 'PQS') eBC++;
-        else if (['AP', 'ESP', 'AGUA'].contains(agente)) eAgua++;
-        else if (agente == 'CO2') eCO2++;
-      }
-      if (statusRaw == 'aguardandopremontagem') premont++;
-      if (statusRaw == 'aguardandomontagem') mont++;
-      if (statusRaw == 'aguardandoth') test++;
-      if (statusRaw == 'aguardandomanutencaovalvulapo') valvulaPo++;
-      if (statusRaw == 'aguardandoexpedicao') expedicao++;
-    }
-
-    return {
-      'descarga': desc,
-      'limpeza': limp,
-      'lixa': lixa,
-      'manutencao': manut,
-      'saque': saque,
-      'pintura': pint,
-      'recarga': rec,
-      'estanqueidade': estanque,
-      'premontagem': premont,
-      'montagem': mont,
-      'teste': test,
-      'valvulaPo': valvulaPo,
-      'expedicao': expedicao,
-      'descargaABC': dABC,
-      'descargaBC': dBC,
-      'descargaAgua': dAgua,
-      'descargaCO2': dCO2,
-      'recargaABC': rABC,
-      'recargaBC': rBC,
-      'recargaAgua': rAgua,
-      'recargaCO2': rCO2,
-      'estanqueABC': eABC,
-      'estanqueBC': eBC,
-      'estanqueAgua': eAgua,
-      'estanqueCO2': eCO2,
-    };
-  }
-  @override
-  Stream<List<Map<String, dynamic>>> streamItensPorRoteiro(String etapa) {
-    return _db
-        .collection('itens_os')
-        .where('roteiro', arrayContains: etapa)
-        .snapshots()
-        .map((snapshot) => snapshot.docs
-        .map((doc) => {'id': doc.id, ...doc.data()})
-        .toList());
+      final data = doc.data() as Map<String, dynamic>? ?? {};
+      return data.map(
+            (chave, valor) => MapEntry(chave, (valor as num?)?.toInt() ?? 0),
+      );
+    });
   }
 
   @override
-  Stream<List<Map<String, dynamic>>> streamItensEmProducao() {
+  Stream<List<Map<String, dynamic>>> streamItensEmProducao(String empresaId) {
     return _db
         .collection('itens_os')
+        .where('empresaId', isEqualTo: empresaId)
         .where('statusAtual', isEqualTo: 'emProducao')
         .snapshots()
         .map((snapshot) => snapshot.docs
@@ -145,9 +52,10 @@ class FirestoreItemOsRepository implements ItemOsRepository {
 
   @override
   Stream<List<Map<String, dynamic>>> streamItensPorOsEStatus(
-      String osId, String status) {
+      String osId, String status, String empresaId) {
     return _db
         .collection('itens_os')
+        .where('empresaId', isEqualTo: empresaId)
         .where('osId', isEqualTo: osId)
         .where('status', isEqualTo: status)
         .snapshots()
@@ -172,9 +80,10 @@ class FirestoreItemOsRepository implements ItemOsRepository {
 
   @override
   Future<Map<String, dynamic>?> buscarItemPorCracha(
-      String osId, String cracha, String status) async {
+      String osId, String cracha, String status, String empresaId) async {
     final query = await _db
         .collection('itens_os')
+        .where('empresaId', isEqualTo: empresaId)
         .where('osId', isEqualTo: osId)
         .where('idCrachaTemporario', isEqualTo: cracha)
         .where('status', isEqualTo: status)
@@ -196,33 +105,37 @@ class FirestoreItemOsRepository implements ItemOsRepository {
     required String proximaEstacao,
     Map<String, dynamic>? dadosOsExtra,
   }) async {
-    final batch = _db.batch();
-
-    // 1. Atualiza o item: muda o status e grava os dados da etapa
     final itemRef = _db.collection('itens_os').doc(itemId);
-    batch.update(itemRef, {
-      'status': 'aguardando_$proximaEstacao',
-      ...dadosItem,
-    });
+    final osRef = _db.collection('ordens_servico').doc(osId);
 
-    // 2. Conta quantos itens ainda estão pendentes nessa etapa
-    final pendentes = await _db
-        .collection('itens_os')
-        .where('osId', isEqualTo: osId)
-        .where('status', isEqualTo: statusPendente)
-        .get();
+    await _db.runTransaction((transaction) async {
+      // 1. Lê a OS para consultar o placar de pendentes
+      final osDoc = await transaction.get(osRef);
+      final placar = Map<String, dynamic>.from(
+        (osDoc.data() as Map<String, dynamic>?)?['pendentes'] ?? {},
+      );
 
-    // 3. Se esse for o último, avança a OS também
-    if (pendentes.docs.length <= 1) {
-      final osRef = _db.collection('ordens_servico').doc(osId);
-      batch.update(osRef, {
-        'etapaAtual': proximaEstacao,
-        ...?dadosOsExtra, // campos extras como dataFimLixa, dataFimValvulaPo, etc.
+      // 2. Decrementa o contador da etapa atual; incrementa o da próxima
+      final int anterior = (placar[statusPendente] as num?)?.toInt() ?? 0;
+      final int novo = (anterior - 1).clamp(0, 99999);
+
+      // 3. Atualiza o item
+      transaction.update(itemRef, {
+        'status': 'aguardando_$proximaEstacao',
+        ...dadosItem,
       });
-    }
 
-    // 4. Executa tudo de uma vez — atômico
-    await batch.commit();
+      // 4. Atualiza a OS: placar sempre; etapaAtual só quando o último saiu
+      final Map<String, dynamic> osUpdate = {
+        'pendentes.$statusPendente': novo,
+        'pendentes.aguardando_$proximaEstacao': FieldValue.increment(1),
+      };
+      if (novo <= 0) {
+        osUpdate['etapaAtual'] = proximaEstacao;
+        if (dadosOsExtra != null) osUpdate.addAll(dadosOsExtra);
+      }
+      transaction.update(osRef, osUpdate);
+    });
   }
 
   @override
@@ -234,6 +147,9 @@ class FirestoreItemOsRepository implements ItemOsRepository {
     final batch = _db.batch();
     String proximaDaOS = 'montagem';
 
+    // Acumula quantos itens vão para cada próximo status
+    final Map<String, int> novosContadores = {};
+
     for (int i = 0; i < itens.length; i++) {
       final item = itens[i];
       final List<String> roteiro = List<String>.from(item['roteiro'] ?? []);
@@ -242,8 +158,10 @@ class FirestoreItemOsRepository implements ItemOsRepository {
           ? roteiro[indexAtual + 1]
           : 'montagem';
 
-      // Guarda a proxima etapa do último item para atualizar a OS
       if (i == itens.length - 1) proximaDaOS = proxima;
+
+      novosContadores['aguardando_$proxima'] =
+          (novosContadores['aguardando_$proxima'] ?? 0) + 1;
 
       batch.update(_db.collection('itens_os').doc(item['id']), {
         'status': 'aguardando_$proxima',
@@ -254,11 +172,14 @@ class FirestoreItemOsRepository implements ItemOsRepository {
       });
     }
 
-    // Avança a OS para a próxima etapa
-    batch.update(_db.collection('ordens_servico').doc(osId), {
-      'etapaAtual': proximaDaOS,
+    // Monta o update da OS: avança etapa + inicializa placar para cada
+    // próximo status (itens podem seguir roteiros diferentes)
+    final Map<String, dynamic> osUpdate = {'etapaAtual': proximaDaOS};
+    novosContadores.forEach((status, count) {
+      osUpdate['pendentes.$status'] = count;
     });
 
+    batch.update(_db.collection('ordens_servico').doc(osId), osUpdate);
     await batch.commit();
   }
 
@@ -308,6 +229,7 @@ class FirestoreItemOsRepository implements ItemOsRepository {
         'data': FieldValue.serverTimestamp(),
         'operador': operador,
         'pesoVazio': pesoVazio,
+        'pesoCheioMeta': pesoCheioMeta,
       },
     });
 
@@ -332,61 +254,69 @@ class FirestoreItemOsRepository implements ItemOsRepository {
     required String idCracha,
     required String? equipId,
   }) async {
-    final batch = _db.batch();
     final dataAtual =
         '${DateTime.now().month.toString().padLeft(2, '0')}/${DateTime.now().year}';
 
-    // A. Atualiza o item da OS
     final itemRef = _db.collection('itens_os').doc(itemId);
-    batch.update(itemRef, {
-      'status': 'entregue',
-      'statusAtual': 'finalizado',
-      'dataExpedicao': FieldValue.serverTimestamp(),
-    });
+    final osRef = _db.collection('ordens_servico').doc(osId);
 
-    // B. Libera o equipamento
-    if (equipId != null && equipId.isNotEmpty) {
-      final equipRef = _db.collection('equipamentos').doc(equipId);
-      batch.update(equipRef, {
-        'status': 'ativo',
-        'osIdAtual': FieldValue.delete(),
-        'itemIdAtual': FieldValue.delete(),
-        'ultimaRecarga': dataAtual,
-      });
-    }
-
-    // C. Verifica se é o último item pendente
-    final queryPendentes = await _db
-        .collection('itens_os')
-        .where('osId', isEqualTo: osId)
-        .where('status', isEqualTo: 'aguardando_expedicao')
-        .get();
-
-    if (queryPendentes.docs.length <= 1) {
-      final osRef = _db.collection('ordens_servico').doc(osId);
-      batch.update(osRef, {
-        'etapaAtual': 'finalizado',
-        'statusLote': 'entregue_ao_cliente',
-        'dataEncerramento': FieldValue.serverTimestamp(),
-      });
-    }
-
-    // D. Libera o crachá
+    // Busca o crachá fora da transação — leitura auxiliar sem risco de
+    // inconsistência (o crachá não é modificado por outras transações
+    // concorrentes neste fluxo).
     final queryCracha = await _db
         .collection('crachas')
         .where('idCracha', isEqualTo: idCracha)
         .limit(1)
         .get();
 
-    if (queryCracha.docs.isNotEmpty) {
-      batch.update(queryCracha.docs.first.reference, {
-        'status': 'disponivel',
-        'itemOsIdAtual': FieldValue.delete(),
-        'osIdAtual': FieldValue.delete(),
-      });
-    }
+    await _db.runTransaction((transaction) async {
+      // 1. Lê o placar da OS
+      final osDoc = await transaction.get(osRef);
+      final placar = Map<String, dynamic>.from(
+        (osDoc.data() as Map<String, dynamic>?)?['pendentes'] ?? {},
+      );
 
-    await batch.commit();
+      const statusAtual = 'aguardando_expedicao';
+      final int anterior = (placar[statusAtual] as num?)?.toInt() ?? 0;
+      final int novo = (anterior - 1).clamp(0, 99999);
+
+      // 2. Atualiza o item da OS
+      transaction.update(itemRef, {
+        'status': 'entregue',
+        'statusAtual': 'finalizado',
+        'dataExpedicao': FieldValue.serverTimestamp(),
+      });
+
+      // 3. Libera o equipamento
+      if (equipId != null && equipId.isNotEmpty) {
+        transaction.update(_db.collection('equipamentos').doc(equipId), {
+          'status': 'ativo',
+          'osIdAtual': FieldValue.delete(),
+          'itemIdAtual': FieldValue.delete(),
+          'ultimaRecarga': dataAtual,
+        });
+      }
+
+      // 4. Libera o crachá
+      if (queryCracha.docs.isNotEmpty) {
+        transaction.update(queryCracha.docs.first.reference, {
+          'status': 'disponivel',
+          'itemOsIdAtual': FieldValue.delete(),
+          'osIdAtual': FieldValue.delete(),
+        });
+      }
+
+      // 5. Atualiza a OS: placar sempre; fecha se for o último
+      final Map<String, dynamic> osUpdate = {
+        'pendentes.$statusAtual': novo,
+      };
+      if (novo <= 0) {
+        osUpdate['etapaAtual'] = 'finalizado';
+        osUpdate['statusLote'] = 'entregue_ao_cliente';
+        osUpdate['dataEncerramento'] = FieldValue.serverTimestamp();
+      }
+      transaction.update(osRef, osUpdate);
+    });
   }
 
   @override
@@ -403,9 +333,10 @@ class FirestoreItemOsRepository implements ItemOsRepository {
 
   @override
   Future<Map<String, dynamic>?> buscarItemPorCrachaEOsId(
-      String osId, String cracha) async {
+      String osId, String cracha, String empresaId) async {
     final query = await _db
         .collection('itens_os')
+        .where('empresaId', isEqualTo: empresaId)
         .where('osId', isEqualTo: osId)
         .where('idCrachaTemporario', isEqualTo: cracha)
         .limit(1)
@@ -430,24 +361,18 @@ class FirestoreItemOsRepository implements ItemOsRepository {
     required String loteFinal,
     required String tipoRegistro,
     required String? loteSelecionadoId,
-    required String? codigoMestre,
+    required String? produtoId,
     required String? clienteNome,
     required String cc,
+    required String operador,
   }) async {
     final batch = _db.batch();
     final dataAtual =
         '${DateTime.now().month.toString().padLeft(2, '0')}/${DateTime.now().year}';
 
     // 1. Se substituiu o pó: desconta estoque e cria movimentação
-    if (isPo && substituirPo && loteSelecionadoId != null && codigoMestre != null) {
-      final prodQuery = await _db
-          .collection('produtos')
-          .where('codigo', isEqualTo: codigoMestre)
-          .limit(1)
-          .get();
-      if (prodQuery.docs.isEmpty) throw 'Produto mestre não encontrado!';
-      final String produtoId = prodQuery.docs.first.id;
-
+    // produtoId já vem da tela — sem query extra ao banco
+    if (isPo && substituirPo && loteSelecionadoId != null && produtoId != null) {
       batch.update(
         _db.collection('produtos').doc(produtoId).collection('lotes').doc(loteSelecionadoId),
         {'quantidadeAtual': FieldValue.increment(-pesoCarga)},
@@ -464,7 +389,7 @@ class FirestoreItemOsRepository implements ItemOsRepository {
         'quantidade': pesoCarga,
         'numeroOS': osId,
         'equipamento': idCrachaTemporario,
-        'operador': 'producao_recarga',
+        'operador': operador,
         'clienteNome': clienteNome,
         'cc': cc,
       });
@@ -506,20 +431,27 @@ class FirestoreItemOsRepository implements ItemOsRepository {
     required String statusAnterior,
     required Map<String, dynamic> dadosOS,
   }) async {
-    // Busca todos os itens da OS com o status atual
     final snapshot = await _db
         .collection('itens_os')
         .where('osId', isEqualTo: osId)
         .where('status', isEqualTo: statusAtual)
         .get();
 
-    // Usa batch para atualizar tudo de uma vez — operação atômica
     final batch = _db.batch();
     for (var doc in snapshot.docs) {
       batch.update(doc.reference, {'status': statusAnterior});
     }
+
+    // Reseta o placar: zera a etapa atual e restaura a anterior
+    // com a contagem real dos itens revertidos
     batch.update(
-        _db.collection('ordens_servico').doc(osId), dadosOS);
+      _db.collection('ordens_servico').doc(osId),
+      {
+        ...dadosOS,
+        'pendentes.$statusAtual': 0,
+        'pendentes.$statusAnterior': snapshot.docs.length,
+      },
+    );
 
     await batch.commit();
   }
@@ -537,6 +469,8 @@ class FirestoreItemOsRepository implements ItemOsRepository {
     required String motivo,
   }) async {
     final batch = _db.batch();
+    final String? osId = item['osId'] as String?;
+    final String? statusAtual = item['status'] as String?;
 
     // 1. Atualiza o item da OS
     batch.update(_db.collection('itens_os').doc(itemId), {
@@ -565,6 +499,14 @@ class FirestoreItemOsRepository implements ItemOsRepository {
       );
     }
 
+    // 3. Decrementa o placar da OS para que o contador não fique
+    //    inflado após a condenação — o item saiu da fila da etapa
+    if (osId != null && osId.isNotEmpty && statusAtual != null) {
+      batch.update(_db.collection('ordens_servico').doc(osId), {
+        'pendentes.$statusAtual': FieldValue.increment(-1),
+      });
+    }
+
     await batch.commit();
   }
 
@@ -577,37 +519,48 @@ class FirestoreItemOsRepository implements ItemOsRepository {
     required String proximaEstacao,
     required bool precisaPintura,
     required bool testeVencido,
+    required String operador,
   }) async {
-    final batch = _db.batch();
+    final itemRef = _db.collection('itens_os').doc(itemId);
+    final osRef = _db.collection('ordens_servico').doc(osId);
 
-    batch.update(_db.collection('itens_os').doc(itemId), {
-      'status': proximoStatus,
-      'statusAtual': 'emProducao',
-      'roteiro': roteiro,
-      'triagem': {
-        'precisaPintura': precisaPintura,
-        'testeVencido': testeVencido,
-        'data': FieldValue.serverTimestamp(),
-        'operador': 'app_triagem',
-      },
-    });
+    await _db.runTransaction((transaction) async {
+      // 1. Lê o placar da OS
+      final osDoc = await transaction.get(osRef);
+      final placar = Map<String, dynamic>.from(
+        (osDoc.data() as Map<String, dynamic>?)?['pendentes'] ?? {},
+      );
 
-    // Se este for o último item na limpeza, avança a OS
-    final queryPendentes = await _db
-        .collection('itens_os')
-        .where('osId', isEqualTo: osId)
-        .where('status', isEqualTo: 'aguardando_limpeza')
-        .get();
+      // 2. Decrementa limpeza; incrementa o próximo status deste item
+      const statusAtual = 'aguardando_limpeza';
+      final int anterior = (placar[statusAtual] as num?)?.toInt() ?? 0;
+      final int novo = (anterior - 1).clamp(0, 99999);
 
-    if (queryPendentes.docs.length <= 1) {
-      batch.update(_db.collection('ordens_servico').doc(osId), {
-        'etapaAtual': proximaEstacao,
-        'statusLote': 'em_producao',
-        'dataFimLimpeza': FieldValue.serverTimestamp(),
+      // 3. Atualiza o item
+      transaction.update(itemRef, {
+        'status': proximoStatus,
+        'statusAtual': 'emProducao',
+        'roteiro': roteiro,
+        'triagem': {
+          'precisaPintura': precisaPintura,
+          'testeVencido': testeVencido,
+          'data': FieldValue.serverTimestamp(),
+          'operador': operador,
+        },
       });
-    }
 
-    await batch.commit();
+      // 4. Atualiza a OS
+      final Map<String, dynamic> osUpdate = {
+        'pendentes.$statusAtual': novo,
+        'pendentes.$proximoStatus': FieldValue.increment(1),
+      };
+      if (novo <= 0) {
+        osUpdate['etapaAtual'] = proximaEstacao;
+        osUpdate['statusLote'] = 'em_producao';
+        osUpdate['dataFimLimpeza'] = FieldValue.serverTimestamp();
+      }
+      transaction.update(osRef, osUpdate);
+    });
   }
 
   @override
@@ -678,6 +631,8 @@ class FirestoreItemOsRepository implements ItemOsRepository {
     batch.update(_db.collection('ordens_servico').doc(osId), {
       'etapaAtual': 'limpeza',
       'statusLote': 'na_limpeza',
+      // Inicializa o placar para a etapa de limpeza
+      'pendentes.aguardando_limpeza': itemIds.length,
     });
     await batch.commit();
   }
@@ -701,21 +656,23 @@ class FirestoreItemOsRepository implements ItemOsRepository {
     batch.update(_db.collection('ordens_servico').doc(osId), {
       'etapaAtual': 'descarga',
       'statusLote': 'em_descarga',
+      'pendentes.aguardando_limpeza': 0,
+      'pendentes.aguardando_descarga': query.docs.length,
     });
     await batch.commit();
   }
   @override
-  Future<void> confirmarDescargaItem(String itemOsId) async {
+  Future<void> confirmarDescargaItem(String itemOsId, String operador) async {
     await _db.collection('itens_os').doc(itemOsId).update({
       'status': 'descarga_concluida',
       'dataDescarga': FieldValue.serverTimestamp(),
-      'realizadoPor': 'operador_descarga',
+      'realizadoPor': operador,
     });
   }
 
   @override
   Future<void> confirmarDescargaPorCracha(
-      String osId, String idCracha) async {
+      String osId, String idCracha, String operador) async {
     final query = await _db
         .collection('itens_os')
         .where('osId', isEqualTo: osId)
@@ -725,34 +682,43 @@ class FirestoreItemOsRepository implements ItemOsRepository {
         .get();
 
     if (query.docs.isEmpty) {
-      throw Exception(
-          'Crachá não encontrado nesta OS ou já baixado.');
+      throw Exception('Crachá não encontrado nesta OS ou já baixado.');
     }
 
-    final batch = _db.batch();
+    final itemRef = query.docs.first.reference;
+    final osRef = _db.collection('ordens_servico').doc(osId);
 
-    batch.update(query.docs.first.reference, {
-      'status': 'aguardando_limpeza',
-      'dataDescarga': FieldValue.serverTimestamp(),
-      'realizadoPor': 'operador_descarga_auto',
-    });
+    await _db.runTransaction((transaction) async {
+      // 1. Lê o placar da OS
+      final osDoc = await transaction.get(osRef);
+      final placar = Map<String, dynamic>.from(
+        (osDoc.data() as Map<String, dynamic>?)?['pendentes'] ?? {},
+      );
 
-    // Se este for o último item pendente, avança a OS
-    final queryPendentes = await _db
-        .collection('itens_os')
-        .where('osId', isEqualTo: osId)
-        .where('status', isEqualTo: 'aguardando_descarga')
-        .get();
+      const statusAtual = 'aguardando_descarga';
+      final int anterior = (placar[statusAtual] as num?)?.toInt() ?? 0;
+      final int novo = (anterior - 1).clamp(0, 99999);
 
-    if (queryPendentes.docs.length <= 1) {
-      batch.update(_db.collection('ordens_servico').doc(osId), {
-        'etapaAtual': 'limpeza',
-        'statusLote': 'na_limpeza',
-        'dataFimDescarga': FieldValue.serverTimestamp(),
+      // 2. Avança o item para limpeza
+      transaction.update(itemRef, {
+        'status': 'aguardando_limpeza',
+        'dataDescarga': FieldValue.serverTimestamp(),
+        'realizadoPor': operador,
       });
-    }
 
-    await batch.commit();
+      // 3. Atualiza OS: decrementa descarga, incrementa limpeza
+      //    Se for o último, avança a OS
+      final Map<String, dynamic> osUpdate = {
+        'pendentes.$statusAtual': novo,
+        'pendentes.aguardando_limpeza': FieldValue.increment(1),
+      };
+      if (novo <= 0) {
+        osUpdate['etapaAtual'] = 'limpeza';
+        osUpdate['statusLote'] = 'na_limpeza';
+        osUpdate['dataFimDescarga'] = FieldValue.serverTimestamp();
+      }
+      transaction.update(osRef, osUpdate);
+    });
   }
 
   @override
@@ -787,13 +753,51 @@ class FirestoreItemOsRepository implements ItemOsRepository {
 
 
   @override
-  Future<bool> verificarCrachaEmUso(String idCracha) async {
+  Future<bool> verificarCrachaEmUso(String idCracha, String empresaId) async {
+    // Consulta a coleção 'crachas' — propósito exclusivo de rastrear
+    // disponibilidade dos crachás físicos. Muito menor que 'itens_os'
+    // (máx. 1500 docs vs potencialmente milhares) e logicamente correta.
     final snap = await _db
-        .collection('itens_os')
-        .where('idCrachaTemporario', isEqualTo: idCracha)
-        .where('statusAtual', isEqualTo: 'entregue')
+        .collection('crachas')
+        .where('empresaId', isEqualTo: empresaId)
+        .where('idCracha', isEqualTo: idCracha)
+        .where('status', isEqualTo: 'emUso')
         .limit(1)
         .get();
     return snap.docs.isNotEmpty;
+  }
+  @override
+  Future<void> registrarPecasTrocadas({
+    required String itemId,
+    required String osId,
+    required String empresaId,
+    required Map<int, String> pecas,
+  }) async {
+    if (pecas.isEmpty) return;
+
+    await _db.collection('itens_os').doc(itemId).update({
+      'pecasTrocadas': FieldValue.arrayUnion(pecas.keys.toList()),
+    });
+  }
+
+  @override
+  Future<Map<String, dynamic>?> buscarInfoCracha(
+      String idCracha, String empresaId) async {
+    final snap = await _db
+        .collection('crachas')
+        .where('empresaId', isEqualTo: empresaId)
+        .where('idCracha', isEqualTo: idCracha)
+        .limit(1)
+        .get();
+    if (snap.docs.isEmpty) return null;
+    final doc = snap.docs.first;
+    return {'id': doc.id, ...doc.data()};
+  }
+
+  @override
+  Future<Map<String, dynamic>?> buscarItemPorId(String itemId) async {
+    final doc = await _db.collection('itens_os').doc(itemId).get();
+    if (!doc.exists) return null;
+    return _toMap(doc);
   }
 }

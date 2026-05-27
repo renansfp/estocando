@@ -23,8 +23,9 @@ class FirestoreEquipamentoRepository implements EquipamentoRepository {
   }
 
   @override
-  Stream<List<Equipamento>> listarPorCliente(String clienteId) {
+  Stream<List<Equipamento>> listarPorCliente(String clienteId, String empresaId) {
     return _col
+        .where('empresaId', isEqualTo: empresaId)
         .where('clienteId', isEqualTo: clienteId)
         .snapshots()
         .map((snapshot) => snapshot.docs
@@ -103,25 +104,28 @@ class FirestoreEquipamentoRepository implements EquipamentoRepository {
     required String clienteId,
     required String codigo,
   }) async {
-    // Tenta primeiro pelo ativo fixo
-    var snap = await _col
-        .where('empresaId', isEqualTo: empresaId)
-        .where('clienteId', isEqualTo: clienteId)
-        .where('ativoFixo', isEqualTo: codigo)
-        .limit(1)
-        .get();
-
-    // Fallback: tenta pelo número de cilindro
-    if (snap.docs.isEmpty) {
-      snap = await _col
+    // Dispara as duas queries em paralelo em vez de sequencial.
+    // Antes: query1 termina → só então começa query2 (~600ms no pior caso).
+    // Agora: ambas começam juntas → resultado em ~300ms independente do caso.
+    final results = await Future.wait([
+      _col
+          .where('empresaId', isEqualTo: empresaId)
+          .where('clienteId', isEqualTo: clienteId)
+          .where('ativoFixo', isEqualTo: codigo)
+          .limit(1)
+          .get(),
+      _col
           .where('empresaId', isEqualTo: empresaId)
           .where('clienteId', isEqualTo: clienteId)
           .where('numeroCilindro', isEqualTo: codigo)
           .limit(1)
-          .get();
-    }
+          .get(),
+    ]);
 
+    // Prioriza resultado por ativoFixo; fallback para numeroCilindro
+    final snap = results[0].docs.isNotEmpty ? results[0] : results[1];
     if (snap.docs.isEmpty) return null;
+
     final doc = snap.docs.first;
     return Equipamento.fromJson(doc.data() as Map<String, dynamic>, doc.id);
   }

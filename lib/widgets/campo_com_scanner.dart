@@ -29,7 +29,6 @@ class _CampoComScannerState extends State<CampoComScanner> {
 
   // Função para abrir a câmera
   void _abrirScanner() async {
-    // Pede permissão e abre a tela
     final result = await Navigator.push(
       context,
       MaterialPageRoute(
@@ -37,7 +36,6 @@ class _CampoComScannerState extends State<CampoComScanner> {
       ),
     );
 
-    // Se voltou com algum código
     if (result != null && result is String) {
       if (!mounted) return;
 
@@ -45,7 +43,11 @@ class _CampoComScannerState extends State<CampoComScanner> {
         widget.controller.text = result;
       });
 
-      // Chama a função de busca/salvar se tiver sido passada
+      // Aguarda o próximo frame para o Flutter terminar o rebuild
+      // antes de chamar o callback (necessário no Web).
+      await Future.delayed(const Duration(milliseconds: 150));
+      if (!mounted) return;
+
       if (widget.onSubmitted != null) {
         widget.onSubmitted!(result);
       }

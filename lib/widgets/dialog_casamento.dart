@@ -128,7 +128,7 @@ class _DialogCasamentoState extends State<DialogCasamento> {
       // 2. Verifica se o crachá está em uso em outra OS no banco
       final emUso = await context
           .read<ItemOsProvider>()
-          .verificarCrachaEmUso(valorLimpo);
+          .verificarCrachaEmUso(valorLimpo, widget.empresaId);
 
       if (!mounted) return;
 

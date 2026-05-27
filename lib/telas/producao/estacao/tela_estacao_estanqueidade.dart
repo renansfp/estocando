@@ -2,9 +2,12 @@
 
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:protecin_producao/models/usuario.dart';
 import 'package:protecin_producao/provider/item_os_provider.dart';
+import 'package:protecin_producao/provider/usuario_provider.dart';
 import 'package:protecin_producao/widgets/botao_condenar.dart';
 import 'package:protecin_producao/widgets/campo_com_scanner.dart';
+import 'package:protecin_producao/widgets/seletor_operador.dart';
 
 class TelaEstacaoEstanqueidade extends StatefulWidget {
   final String osId;
@@ -46,7 +49,7 @@ class _TelaEstacaoEstanqueidadeState
           'estanqueidade': {
             'data': DateTime.now(),
             'resultado': 'APROVADO',
-            'operador': 'bancada_estanqueidade',
+            'operador': context.read<UsuarioProvider>().operadorAtivo?.nome ?? 'Operador',
           }
         },
         osId: widget.osId,
@@ -112,11 +115,11 @@ class _TelaEstacaoEstanqueidadeState
   Future<void> _processarBipe(String codigo) async {
     if (codigo.isEmpty) return;
     String idCracha = _limparCodigo(codigo);
-
+    final empresaId = context.read<UsuarioProvider>().usuario?.empresaId ?? '';
     final item = await context.read<ItemOsProvider>().buscarItemPorCracha(
       widget.osId,
       idCracha,
-      'aguardando_estanqueidade',
+      'aguardando_estanqueidade', empresaId,
     );
 
     if (item != null) {
@@ -137,11 +140,15 @@ class _TelaEstacaoEstanqueidadeState
 
   @override
   Widget build(BuildContext context) {
+    final empresaId = context.read<UsuarioProvider>().usuario?.empresaId ?? '';
     return Scaffold(
       appBar: AppBar(
         title: Text('Estanqueidade: OS ${widget.osId}'),
         backgroundColor: Colors.teal.shade800,
         foregroundColor: Colors.white,
+        actions: const [
+          SeletorOperador(estacao: EstacaoProducao.estanqueidade),
+        ],
       ),
       body: Column(
         children: [
@@ -160,7 +167,7 @@ class _TelaEstacaoEstanqueidadeState
               stream: context
                   .read<ItemOsProvider>()
                   .streamItensPorOsEStatus(
-                  widget.osId, 'aguardando_estanqueidade'),
+                  widget.osId, 'aguardando_estanqueidade', empresaId),
               builder: (context, snap) {
                 if (!snap.hasData) {
                   return const Center(child: CircularProgressIndicator());

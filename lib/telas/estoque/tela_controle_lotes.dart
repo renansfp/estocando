@@ -240,10 +240,10 @@ class _TelaControleLotesPoState extends State<TelaControleLotesPo> {
                 ]),
               ),
               Expanded(
-                child: StreamBuilder<List<Map<String, dynamic>>>(
-                  stream: context
+                child: FutureBuilder<List<Map<String, dynamic>>>(
+                  future: context
                       .read<MovimentacaoProvider>()
-                      .streamMovimentacoesPorLote(empresaId, loteId),
+                      .buscarMovimentacoesPorLote(empresaId, loteId),
                   builder: (context, snapshot) {
                     if (snapshot.hasError) {
                       return const Center(

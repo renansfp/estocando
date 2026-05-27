@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 import 'package:protecin_producao/provider/item_os_provider.dart';
 import 'package:protecin_producao/widgets/botao_condenar.dart';
 import 'package:protecin_producao/widgets/campo_com_scanner.dart';
+import 'package:protecin_producao/provider/usuario_provider.dart';
 
 class TelaEstacaoPintura extends StatefulWidget {
   final String osId;
@@ -60,11 +61,11 @@ class _TelaEstacaoPinturaState extends State<TelaEstacaoPintura> {
   Future<void> _processarBipe(String codigo) async {
     if (codigo.isEmpty) return;
     final idCracha = _limparCodigo(codigo);
-
+    final empresaId = context.read<UsuarioProvider>().usuario?.empresaId ?? '';
     final item = await context.read<ItemOsProvider>().buscarItemPorCracha(
       widget.osId,
       idCracha,
-      'aguardando_pintura',
+      'aguardando_pintura', empresaId,
     );
 
     if (item != null) {
@@ -82,6 +83,7 @@ class _TelaEstacaoPinturaState extends State<TelaEstacaoPintura> {
 
   @override
   Widget build(BuildContext context) {
+    final empresaId = context.read<UsuarioProvider>().usuario?.empresaId ?? '';
     return Scaffold(
       appBar: AppBar(
         title: Text('Pintura: OS ${widget.osId}'),
@@ -109,7 +111,7 @@ class _TelaEstacaoPinturaState extends State<TelaEstacaoPintura> {
             child: StreamBuilder<List<Map<String, dynamic>>>(
               stream: context
                   .read<ItemOsProvider>()
-                  .streamItensPorOsEStatus(widget.osId, 'aguardando_pintura'),
+                  .streamItensPorOsEStatus(widget.osId, 'aguardando_pintura', empresaId),
               builder: (context, snapshot) {
                 if (!snapshot.hasData) {
                   return const Center(child: CircularProgressIndicator());

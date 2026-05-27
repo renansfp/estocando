@@ -209,7 +209,7 @@ class RelatorioOsService {
       for (final raw in rawItens) {
         final ts = raw['dataExpedicao'];
         if (ts != null) {
-          final dt = (ts as dynamic).toDate() as DateTime;
+          final dt = ts is DateTime ? ts : (ts as dynamic).toDate() as DateTime;
           if (dataFinalizacao == null || dt.isAfter(dataFinalizacao)) {
             dataFinalizacao = dt;
           }

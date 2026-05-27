@@ -51,23 +51,18 @@ class _TelaCriarOSState extends State<TelaCriarOS> {
     if (novoItem != null) {
       // --- BLINDAGEM 1: DUPLICIDADE LOCAL (Na mesma lista) ---
       // Verifica se o item já foi adicionado nesta tela agora
-      bool jaEstaNaLista = _itensDaOS.any((item) => item.equipamentoId == novoItem.equipamentoId);
+      final jaEstaNaLista = _itensDaOS
+          .any((item) => item.equipamentoId == novoItem.equipamentoId);
 
       if (jaEstaNaLista) {
-        _mostrarAlertaErro('Duplicidade Local', 'Este equipamento JÁ ESTÁ nesta lista de OS.');
+        _mostrarAlertaErro(
+            'Duplicidade Local', 'Este equipamento JÁ ESTÁ nesta lista de OS.');
         return;
       }
 
-      // --- BLINDAGEM 2: DUPLICIDADE GLOBAL (Em outra OS) ---
-      // Consulta o banco para ver se ele está 'ativo' ou 'em_manutencao'
-      bool estaLivre = await _verificarDisponibilidadeNoBanco(novoItem.equipamentoId);
-
-      if (!estaLivre) {
-        // Se não estiver livre, o alerta já foi exibido dentro da função de verificação
-        return;
-      }
-
-      // Se passou pelas duas barreiras, adiciona!
+      // A disponibilidade global já foi verificada dentro do DialogCasamento
+      // (_buscarDossie checa status e osIdAtual). Não é necessária uma segunda
+      // consulta ao Firebase aqui — ela apenas adiciona latência sem benefício.
       setState(() {
         _itensDaOS.add(novoItem);
       });

@@ -10,7 +10,7 @@ enum DiagnosticoBloqueio {
 
 abstract class EquipamentoRepository {
   Stream<List<Equipamento>> listarPorEmpresa(String empresaId);
-  Stream<List<Equipamento>> listarPorCliente(String clienteId);
+  Stream<List<Equipamento>> listarPorCliente(String clienteId, String empresaId);
   Future<Equipamento?> buscarPorId(String id);
   Future<bool> verificarDisponibilidade(String equipamentoId);
   Future<String> criar(Equipamento equipamento);

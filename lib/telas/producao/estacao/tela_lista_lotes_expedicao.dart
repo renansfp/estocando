@@ -16,18 +16,27 @@ class TelaListaLotesExpedicao extends StatelessWidget {
     return TelaListaLotesBase(
       titulo: 'Fila: Expedição e Carregamento',
       corSetor: Colors.black87,
-      // Avatar com caminhão em vez de contador numérico
       iconeAvatar: Icons.local_shipping,
       statusAguardando: 'aguardando_expedicao',
       mensagemVazia: 'Nenhum lote pronto para carregar.',
       textoSubtitulo: (passaram, total) => '$passaram de $total cilindros carregados',
-      streamFonte: (repo) => repo.streamItensEmProducao(),
-      // Conta itens já bipados na expedição ou entregues
+      streamFonte: (repo, empresaId) => repo.streamItensEmProducao(empresaId),
       contadorJaPassaram: (itens) => itens.where((doc) {
         final st = doc['status']?.toString() ?? '';
         return st == 'finalizado' || st == 'entregue';
       }).length,
       construtorTela: (osId) => TelaEstacaoExpedicao(osId: osId),
+      // ── Novos recursos ──────────────────────────────────────────
+      mostrarNomeCliente: true,
+      mostrarBotaoRequisicao: true,
+      nomeSetorCC: '', // Expedição não tem CC de produção — usuário preenche se precisar
+      mostrarBotaoReverter: true,
+      statusParaReverter: 'aguardando_expedicao',
+      statusAnteriorReverter: 'aguardando_montagem',
+      etapaAnteriorOS: 'montagem',
+      statusLoteAnteriorOS: 'em_montagem',
+      mensagemReverter:
+      'Deseja devolver este lote inteiro para a etapa de MONTAGEM?',
     );
   }
 }

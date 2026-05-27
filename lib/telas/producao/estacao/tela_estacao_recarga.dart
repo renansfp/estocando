@@ -3,13 +3,23 @@ import 'package:provider/provider.dart';
 import 'package:protecin_producao/provider/item_os_provider.dart';
 import 'package:protecin_producao/widgets/campo_com_scanner.dart';
 import 'package:protecin_producao/telas/producao/estacao/tela_execucao_recarga.dart';
+import 'package:protecin_producao/provider/usuario_provider.dart';
 
 class TelaEstacaoRecarga extends StatefulWidget {
   final String osId;
   final List<String> filtrosAgente;
 
-  const TelaEstacaoRecarga(
-      {super.key, required this.osId, required this.filtrosAgente});
+  /// Status exato salvo no banco para este tipo de recarga.
+  /// Ex: 'aguardando_recarga_co2', 'aguardando_recarga_abc', etc.
+  /// Precisa bater com o valor gerado pelo roteiro em tela_triagem_limpeza.
+  final String statusRecarga;
+
+  const TelaEstacaoRecarga({
+    super.key,
+    required this.osId,
+    required this.filtrosAgente,
+    required this.statusRecarga,
+  });
 
   @override
   State<TelaEstacaoRecarga> createState() => _TelaEstacaoRecargaState();
@@ -28,10 +38,16 @@ class _TelaEstacaoRecargaState extends State<TelaEstacaoRecarga> {
     if (codigo.isEmpty) return;
     String idCracha = _limparCodigo(codigo);
 
-    // Busca sem filtrar por status — verificamos agente e status aqui
+    final empresaId = context.read<UsuarioProvider>().usuario?.empresaId ?? '';
+
     final item = await context
         .read<ItemOsProvider>()
-        .buscarItemPorCrachaEOsId(widget.osId, idCracha);
+        .buscarItemPorCracha(
+      widget.osId,
+      idCracha,
+      widget.statusRecarga,   // ← filtro pelo status correto da bancada
+      empresaId,
+    );
 
     if (item != null) {
       String ag = item['tipoAgente']?.toString().toUpperCase() ?? '';
@@ -40,14 +56,26 @@ class _TelaEstacaoRecargaState extends State<TelaEstacaoRecarga> {
         return ag.contains(f.toUpperCase());
       });
 
-      if (agenteBate && item['status'].toString().contains('recarga')) {
+      if (agenteBate) {
         _irParaExecucao(item);
       } else {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Agente incorreto para esta bancada.')),
+            const SnackBar(
+              content: Text('Agente incorreto para esta bancada.'),
+              backgroundColor: Colors.orange,
+            ),
           );
         }
+      }
+    } else {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Crachá não encontrado nesta bancada de recarga.'),
+            backgroundColor: Colors.red,
+          ),
+        );
       }
     }
     _scannerController.clear();
@@ -64,6 +92,7 @@ class _TelaEstacaoRecargaState extends State<TelaEstacaoRecarga> {
 
   @override
   Widget build(BuildContext context) {
+    final empresaId = context.read<UsuarioProvider>().usuario?.empresaId ?? '';
     return Scaffold(
       appBar: AppBar(
         title: Text('Recarga: OS ${widget.osId}'),
@@ -83,7 +112,7 @@ class _TelaEstacaoRecargaState extends State<TelaEstacaoRecarga> {
             child: StreamBuilder<List<Map<String, dynamic>>>(
               stream: context
                   .read<ItemOsProvider>()
-                  .streamItensPorOsEStatus(widget.osId, 'aguardando_recarga'),
+                  .streamItensPorOsEStatus(widget.osId, widget.statusRecarga,empresaId),
               builder: (context, snapshot) {
                 if (!snapshot.hasData) {
                   return const Center(child: CircularProgressIndicator());

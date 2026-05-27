@@ -8,6 +8,7 @@ import 'package:protecin_producao/widgets/campo_com_scanner.dart';
 import 'package:protecin_producao/telas/producao/estacao/tela_triagem_limpeza.dart';
 import 'package:protecin_producao/telas/estoque/tela_criar_requisicao.dart';
 import 'package:protecin_producao/utils/mapeador_custos.dart';
+import 'package:protecin_producao/provider/usuario_provider.dart';
 
 class TelaEstacaoLimpeza extends StatefulWidget {
   final String osId;
@@ -31,10 +32,11 @@ class _TelaEstacaoLimpezaState extends State<TelaEstacaoLimpeza> {
     String idCracha = _limparCodigo(codigo);
 
     try {
+      final empresaId = context.read<UsuarioProvider>().usuario?.empresaId ?? '';
       final item = await context.read<ItemOsProvider>().buscarItemPorCracha(
         widget.osId,
         idCracha,
-        'aguardando_limpeza',
+        'aguardando_limpeza', empresaId,
       );
 
       if (item != null) {
@@ -65,6 +67,7 @@ class _TelaEstacaoLimpezaState extends State<TelaEstacaoLimpeza> {
 
   @override
   Widget build(BuildContext context) {
+    final empresaId = context.read<UsuarioProvider>().usuario?.empresaId ?? '';
     return Scaffold(
       appBar: AppBar(
         title: const Text('Estação: Limpeza & Triagem'),
@@ -91,7 +94,7 @@ class _TelaEstacaoLimpezaState extends State<TelaEstacaoLimpeza> {
             child: StreamBuilder<List<Map<String, dynamic>>>(
               stream: context
                   .read<ItemOsProvider>()
-                  .streamItensPorOsEStatus(widget.osId, 'aguardando_limpeza'),
+                  .streamItensPorOsEStatus(widget.osId, 'aguardando_limpeza', empresaId),
               builder: (context, snapshot) {
                 if (!snapshot.hasData) {
                   return const Center(child: CircularProgressIndicator());

@@ -8,6 +8,7 @@ import 'package:protecin_producao/widgets/campo_com_scanner.dart';
 import 'package:protecin_producao/telas/producao/estacao/tela_ensaio_th.dart';
 import 'package:protecin_producao/telas/estoque/tela_criar_requisicao.dart';
 import 'package:protecin_producao/utils/mapeador_custos.dart';
+import 'package:protecin_producao/provider/usuario_provider.dart';
 
 class TelaEstacaoTH extends StatefulWidget {
   final String osIdAtual;
@@ -31,10 +32,11 @@ class _TelaEstacaoTHState extends State<TelaEstacaoTH> {
     final idCracha = _limparCodigo(codigo);
 
     try {
+      final empresaId = context.read<UsuarioProvider>().usuario?.empresaId ?? '';
       final item = await context.read<ItemOsProvider>().buscarItemPorCracha(
         widget.osIdAtual,
         idCracha,
-        'aguardando_th',
+        'aguardando_th', empresaId,
       );
 
       if (item != null) {
@@ -68,6 +70,7 @@ class _TelaEstacaoTHState extends State<TelaEstacaoTH> {
 
   @override
   Widget build(BuildContext context) {
+    final empresaId = context.read<UsuarioProvider>().usuario?.empresaId ?? '';
     return Scaffold(
       appBar: AppBar(
         title: const Text('Bancada: Teste Hidrostático'),
@@ -95,7 +98,7 @@ class _TelaEstacaoTHState extends State<TelaEstacaoTH> {
             child: StreamBuilder<List<Map<String, dynamic>>>(
               stream: context
                   .read<ItemOsProvider>()
-                  .streamItensPorOsEStatus(widget.osIdAtual, 'aguardando_th'),
+                  .streamItensPorOsEStatus(widget.osIdAtual, 'aguardando_th', empresaId),
               builder: (context, snapshot) {
                 if (!snapshot.hasData) {
                   return const Center(child: CircularProgressIndicator());

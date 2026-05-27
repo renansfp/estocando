@@ -23,8 +23,9 @@ class ProdutoProvider with ChangeNotifier {
       String empresaId) =>
       _repository.buscarTodosPorEmpresa(empresaId);
 
-  Future<Map<String, dynamic>?> buscarPorCodigo(String codigo) =>
-      _repository.buscarPorCodigo(codigo);
+  Future<Map<String, dynamic>?> buscarPorCodigo(
+      String empresaId, String codigo) =>
+      _repository.buscarPorCodigo(empresaId, codigo);
 
   Stream<List<Map<String, dynamic>>> streamLotesPorProduto(
       String produtoId) =>

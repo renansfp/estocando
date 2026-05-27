@@ -17,7 +17,7 @@ class ItemOsProvider with ChangeNotifier {
   void iniciarEscuta(String empresaId) {
     _subscription?.cancel();
     _subscription = _repository
-        .streamContadoresDashboard(empresaId)
+        .streamDocumentoContadores(empresaId)
         .listen(
           (mapa) {
         _contadores = mapa;
@@ -96,19 +96,16 @@ class ItemOsProvider with ChangeNotifier {
       _repository.streamItensAguardandoDescarga(empresaId, filtrosAgente);
 
   Stream<List<Map<String, dynamic>>> streamItensPorOsEStatus(
-      String osId, String status) =>
-      _repository.streamItensPorOsEStatus(osId, status);
+      String osId, String status, String empresaId) =>
+      _repository.streamItensPorOsEStatus(osId, status,empresaId);
 
   Future<Map<String, dynamic>?> buscarItemPorCracha(
-      String osId, String cracha, String status) =>
-      _repository.buscarItemPorCracha(osId, cracha, status);
+      String osId, String cracha, String status, String empresaId) =>
+      _repository.buscarItemPorCracha(osId, cracha, status,empresaId);
 
   Future<Map<String, dynamic>?> buscarItemPorCrachaEOsId(
-      String osId, String cracha) =>
-      _repository.buscarItemPorCrachaEOsId(osId, cracha);
-
-  Stream<Map<String, int>> streamContadoresDashboard(String empresaId) =>
-      _repository.streamContadoresDashboard(empresaId);
+      String osId, String cracha, String empresaId) =>
+      _repository.buscarItemPorCrachaEOsId(osId, cracha, empresaId);
 
 
   Future<void> processarRecarga({
@@ -124,9 +121,10 @@ class ItemOsProvider with ChangeNotifier {
     required String loteFinal,
     required String tipoRegistro,
     required String? loteSelecionadoId,
-    required String? codigoMestre,
+    required String? produtoId,
     required String? clienteNome,
     required String cc,
+    required String operador,
   }) =>
       _repository.processarRecarga(
         itemId: itemId,
@@ -141,9 +139,10 @@ class ItemOsProvider with ChangeNotifier {
         loteFinal: loteFinal,
         tipoRegistro: tipoRegistro,
         loteSelecionadoId: loteSelecionadoId,
-        codigoMestre: codigoMestre,
+        produtoId: produtoId,
         clienteNome: clienteNome,
         cc: cc,
+        operador: operador,
       );
 
   Future<void> confirmarEtapa({
@@ -187,6 +186,7 @@ class ItemOsProvider with ChangeNotifier {
     required String proximaEstacao,
     required bool precisaPintura,
     required bool testeVencido,
+    required String operador,
   }) =>
       _repository.confirmarTriagem(
         itemId: itemId,
@@ -196,6 +196,7 @@ class ItemOsProvider with ChangeNotifier {
         proximaEstacao: proximaEstacao,
         precisaPintura: precisaPintura,
         testeVencido: testeVencido,
+        operador: operador,
       );
 
   /// Finaliza o ensaio hidrostático, atualizando item e equipamento.
@@ -232,12 +233,13 @@ class ItemOsProvider with ChangeNotifier {
       _repository.reverterParaDescarga(osId);
 
   /// Marca um item como descarga concluída.
-  Future<void> confirmarDescargaItem(String itemOsId) =>
-      _repository.confirmarDescargaItem(itemOsId);
+  Future<void> confirmarDescargaItem(String itemOsId, String operador) =>
+      _repository.confirmarDescargaItem(itemOsId, operador);
 
   /// Confirma a descarga de um item pelo crachá, avançando a OS se necessário.
-  Future<void> confirmarDescargaPorCracha(String osId, String idCracha) =>
-      _repository.confirmarDescargaPorCracha(osId, idCracha);
+  Future<void> confirmarDescargaPorCracha(
+      String osId, String idCracha, String operador) =>
+      _repository.confirmarDescargaPorCracha(osId, idCracha, operador);
 
   /// Stream de itens aguardando descarga em uma OS, filtrado por agente.
   Stream<List<Map<String, dynamic>>> streamItensDescargaOsPorAgente(
@@ -255,6 +257,27 @@ class ItemOsProvider with ChangeNotifier {
       _repository.buscarItensComDadosCompletos(osId);
 
 
-  Future<bool> verificarCrachaEmUso(String idCracha) =>
-      _repository.verificarCrachaEmUso(idCracha);
+  Future<bool> verificarCrachaEmUso(String idCracha, String empresaId) =>
+      _repository.verificarCrachaEmUso(idCracha, empresaId);
+
+  Future<Map<String, dynamic>?> buscarInfoCracha(
+      String idCracha, String empresaId) =>
+      _repository.buscarInfoCracha(idCracha, empresaId);
+
+  Future<Map<String, dynamic>?> buscarItemPorId(String itemId) =>
+      _repository.buscarItemPorId(itemId);
+
+  Future<void> registrarPecasTrocadas({
+    required String itemId,
+    required String osId,
+    required String empresaId,
+    required Map<int, String> pecas,
+  }) async {
+    await _repository.registrarPecasTrocadas(
+      itemId    : itemId,
+      osId      : osId,
+      empresaId : empresaId,
+      pecas     : pecas,
+    );
+  }
 }

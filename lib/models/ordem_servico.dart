@@ -100,11 +100,17 @@ class OrdemServico {
       clienteId: json['clienteId'] ?? '',
       clienteNome: json['clienteNome'] ?? 'Cliente não identificado',
       statusLote: statusSeguro,
-      dataEntrada: (json['dataEntrada'] as Timestamp? ?? Timestamp.now()).toDate(),
-      dataSaida: (json['dataSaida'] as Timestamp?)?.toDate(),
+      dataEntrada: _toDateTime(json['dataEntrada']) ?? DateTime.now(),
+      dataSaida: _toDateTime(json['dataSaida']),
       usuarioNomeEntrada: json['usuarioNomeEntrada'] ?? '---',
       responsavelTecnico: json['responsavelTecnico'] ?? '',
       numeroNF: json['numeroNF'],
     );
+  }
+  static DateTime? _toDateTime(dynamic v) {
+    if (v == null) return null;
+    if (v is DateTime) return v;
+    if (v is Timestamp) return v.toDate();
+    return null;
   }
 }

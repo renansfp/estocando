@@ -79,10 +79,10 @@ class _TelaExtratoMovimentacoesState extends State<TelaExtratoMovimentacoes> {
                 ),
               ),
             )
-                : StreamBuilder<List<Map<String, dynamic>>>(
-              stream: context
+                : FutureBuilder<List<Map<String, dynamic>>>(
+              future: context
                   .read<MovimentacaoProvider>()
-                  .streamMovimentacoesFiltradas(
+                  .buscarMovimentacoesFiltradas(
                 empresaId,
                 dataInicio: _dataInicio,
                 dataFim: _dataFim,

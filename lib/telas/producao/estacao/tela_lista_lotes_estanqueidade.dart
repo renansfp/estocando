@@ -4,8 +4,8 @@
 //   1. O extintor tem 'estanqueidade' no seu roteiro (caminho de produção)
 //   2. O tipo de agente bate com os filtros passados (ex: ['PO', 'ABC'])
 //
-// O parâmetro filtrosAgente é mantido igual ao original para não quebrar
-// as telas que já instanciam esta classe.
+// nomeSetorCC é opcional: permite que a home screen informe o CC
+// correto para cada tipo. Se não informado, o campo fica em branco.
 
 import 'package:flutter/material.dart';
 import 'package:protecin_producao/telas/producao/estacao/tela_lista_lotes_base.dart';
@@ -15,10 +15,14 @@ class TelaListaLotesEstanqueidade extends StatelessWidget {
   final String titulo;
   final List<String> filtrosAgente;
 
+  /// Centro de custo do setor. Opcional — usuário preenche se ficar em branco.
+  final String nomeSetorCC;
+
   const TelaListaLotesEstanqueidade({
     super.key,
     required this.titulo,
     required this.filtrosAgente,
+    this.nomeSetorCC = '',
   });
 
   @override
@@ -26,7 +30,6 @@ class TelaListaLotesEstanqueidade extends StatelessWidget {
     return TelaListaLotesBase(
       titulo: 'Fila: $titulo',
       corSetor: Colors.lightBlue.shade800,
-      // Ícone dinâmico: bolhas para pó, gota para água/espuma
       iconeTrailing: Icon(
         titulo.contains('PQS') || titulo.contains('PÓ')
             ? Icons.bubble_chart
@@ -36,16 +39,15 @@ class TelaListaLotesEstanqueidade extends StatelessWidget {
       statusAguardando: 'aguardando_estanqueidade',
       mensagemVazia: 'Nenhum lote pendente neste setor.',
       textoSubtitulo: (passaram, total) =>
-          passaram == total ? 'Teste Concluído' : 'Aguardando submersão...',
-      streamFonte: (repo) => repo.streamItensEmProducao(),
-      // Filtra: só itens com estanqueidade no roteiro E com o agente certo
+      passaram == total ? 'Teste Concluído' : 'Aguardando submersão...',
+      streamFonte: (repo, empresaId) => repo.streamItensEmProducao(empresaId),
       filtroItem: (doc) {
         final agente = doc['tipoAgente']?.toString().toUpperCase() ?? '';
         final List roteiro = doc['roteiro'] ?? [];
         final temEstanqueidade =
-            roteiro.any((e) => e.toString().contains('estanqueidade'));
+        roteiro.any((e) => e.toString().contains('estanqueidade'));
         final agenteBate =
-            filtrosAgente.any((f) => agente.contains(f.toUpperCase()));
+        filtrosAgente.any((f) => agente.contains(f.toUpperCase()));
         return temEstanqueidade && agenteBate;
       },
       contadorJaPassaram: (itens) => itens.where((doc) {
@@ -56,6 +58,17 @@ class TelaListaLotesEstanqueidade extends StatelessWidget {
         osId: osId,
         filtrosAgente: filtrosAgente,
       ),
+      // ── Novos recursos ──────────────────────────────────────────
+      mostrarNomeCliente: true,
+      mostrarBotaoRequisicao: true,
+      nomeSetorCC: nomeSetorCC,
+      mostrarBotaoReverter: true,
+      statusParaReverter: 'aguardando_estanqueidade',
+      statusAnteriorReverter: 'aguardando_recarga',
+      etapaAnteriorOS: 'recarga',
+      statusLoteAnteriorOS: 'em_recarga',
+      mensagemReverter:
+      'Deseja devolver este lote inteiro para a etapa de RECARGA?',
     );
   }
 }

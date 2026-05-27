@@ -16,8 +16,8 @@ class TelaListaLotesPintura extends StatelessWidget {
       statusAguardando: 'aguardando_pintura',
       mensagemVazia: 'Nenhum extintor pendente de pintura.',
       textoSubtitulo: (passaram, total) =>
-          passaram == total ? 'Lote pintado!' : 'Aguardando pintura...',
-      streamFonte: (repo) => repo.streamItensPorRoteiro('pintura'),
+      passaram == total ? 'Lote pintado!' : 'Aguardando pintura...',
+      streamFonte: (repo, empresaId) => repo.streamItensEmProducao(empresaId),
       contadorJaPassaram: (itens) => itens.where((doc) {
         final st = doc['status']?.toString() ?? '';
         return st != 'aguardando_limpeza' &&
@@ -26,6 +26,17 @@ class TelaListaLotesPintura extends StatelessWidget {
             st != 'aguardando_manutencao_valvula';
       }).length,
       construtorTela: (osId) => TelaEstacaoPintura(osId: osId),
+      // ── Novos recursos ──────────────────────────────────────────
+      mostrarNomeCliente: true,
+      mostrarBotaoRequisicao: true,
+      nomeSetorCC: 'PINTURA', // → CC 4223
+      mostrarBotaoReverter: true,
+      statusParaReverter: 'aguardando_pintura',
+      statusAnteriorReverter: 'aguardando_lixa',
+      etapaAnteriorOS: 'lixa',
+      statusLoteAnteriorOS: 'em_lixa',
+      mensagemReverter:
+      'Deseja devolver este lote inteiro para a etapa de LIXA?',
     );
   }
 }

@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:protecin_producao/provider/item_os_provider.dart';
 import 'package:protecin_producao/telas/producao/estacao/tela_estacao_manutencao_valvula.dart';
+import 'package:protecin_producao/provider/usuario_provider.dart';
 
 class TelaDetalhesLoteValvula extends StatelessWidget {
   final String osId;
@@ -20,6 +21,7 @@ class TelaDetalhesLoteValvula extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final empresaId = context.read<UsuarioProvider>().usuario?.empresaId ?? '';
     return Scaffold(
       appBar: AppBar(
         title: Column(
@@ -54,7 +56,7 @@ class TelaDetalhesLoteValvula extends StatelessWidget {
       body: StreamBuilder<List<Map<String, dynamic>>>(
         stream: context
             .read<ItemOsProvider>()
-            .streamItensPorOsEStatus(osId, 'aguardando_manutencao_valvula'),
+            .streamItensPorOsEStatus(osId, 'aguardando_manutencao_valvula', empresaId),
         builder: (context, snapshot) {
           if (!snapshot.hasData) {
             return const Center(child: CircularProgressIndicator());

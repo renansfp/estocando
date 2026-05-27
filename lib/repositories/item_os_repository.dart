@@ -1,15 +1,18 @@
 // lib/repositories/item_os_repository.dart
 
 abstract class ItemOsRepository {
-  Stream<Map<String, int>> streamContadoresDashboard(String empresaId);
-  Stream<List<Map<String, dynamic>>> streamItensPorRoteiro(String etapa);
-  Stream<List<Map<String, dynamic>>> streamItensEmProducao();
+  /// Lê o documento `contadores/{empresaId}` mantido pela Cloud Function.
+  /// Custo fixo de 1 documento por evento — use para o dashboard e telas de seleção.
+  Stream<Map<String, int>> streamDocumentoContadores(String empresaId);
+
+  /// [empresaId] é obrigatório — isola dados da empresa. Nunca chamar sem ele.
+  Stream<List<Map<String, dynamic>>> streamItensEmProducao(String empresaId);
   Stream<List<Map<String, dynamic>>> streamItensPorOsEStatus(
-      String osId, String status);
+      String osId, String status, String empresaId);
   Stream<List<Map<String, dynamic>>> streamItensAguardandoDescarga(
       String empresaId, List<String> filtrosAgente);
   Future<Map<String, dynamic>?> buscarItemPorCracha(
-      String osId, String cracha, String status);
+      String osId, String cracha, String status, String empresaId);
   Future<void> confirmarEtapa({
     required String itemId,
     required Map<String, dynamic> dadosItem,
@@ -58,7 +61,7 @@ abstract class ItemOsRepository {
     required Map<String, dynamic> dadosFalha,
   });
   Future<Map<String, dynamic>?> buscarItemPorCrachaEOsId(
-      String osId, String cracha);
+      String osId, String cracha, String empresaId);
   Future<void> processarRecarga({
     required String itemId,
     required String osId,
@@ -72,10 +75,20 @@ abstract class ItemOsRepository {
     required String loteFinal,
     required String tipoRegistro,
     required String? loteSelecionadoId,
-    required String? codigoMestre,
+    required String? produtoId,
     required String? clienteNome,
     required String cc,
+    required String operador,
   });
+
+  Future<void> registrarPecasTrocadas({
+    required String itemId,
+    required String osId,
+    required String empresaId,
+    // Map: legendaNumero → codigoProduto
+    required Map<int, String> pecas,
+  });
+
   Future<void> condenarItem({
     required String itemId,
     required Map<String, dynamic> item,
@@ -90,6 +103,7 @@ abstract class ItemOsRepository {
     required String proximaEstacao,
     required bool precisaPintura,
     required bool testeVencido,
+    required String operador,
   });
   Future<void> finalizarEnsaioTH({
     required String itemId,
@@ -109,13 +123,15 @@ abstract class ItemOsRepository {
   // ─── Novos métodos ────────────────────────────────────────────────────────
 
   /// Marca um item como descarga concluída (status = 'descarga_concluida').
-  /// Usado pela TelaBalancoItem ao confirmar a descarga manual.
-  Future<void> confirmarDescargaItem(String itemOsId);
+  /// [operador] é o nome do usuário logado — gravado para rastreabilidade.
+  Future<void> confirmarDescargaItem(String itemOsId, String operador);
 
   /// Busca um item pelo crachá na OS, atualiza para 'aguardando_limpeza'
   /// e avança a OS se for o último item pendente na descarga.
+  /// [operador] é o nome do usuário logado — gravado para rastreabilidade.
   /// Lança [Exception] se o crachá não for encontrado.
-  Future<void> confirmarDescargaPorCracha(String osId, String idCracha);
+  Future<void> confirmarDescargaPorCracha(
+      String osId, String idCracha, String operador);
 
   /// Stream de itens aguardando descarga de uma OS, filtrado por agente.
   /// Usado pela TelaBalancoLote para mostrar itens do setor correspondente.
@@ -131,5 +147,17 @@ abstract class ItemOsRepository {
 
   /// Verifica se um crachá está em uso em qualquer OS no momento.
   /// Retorna true se o crachá está ocupado (statusAtual == 'entregue').
-  Future<bool> verificarCrachaEmUso(String idCracha);
+  Future<bool> verificarCrachaEmUso(String idCracha, String empresaId);
+
+  /// Busca os dados do crachá físico pelo ID legível (ex: "R-042") e empresa.
+  /// Retorna o documento completo da coleção `crachas`, incluindo
+  /// `status`, `itemOsIdAtual` e `osIdAtual`.
+  /// Retorna null se o crachá não existir no banco.
+  Future<Map<String, dynamic>?> buscarInfoCracha(
+      String idCracha, String empresaId);
+
+  /// Busca um item_os diretamente pelo ID do documento.
+  /// Usado pelo Scanner de Crachá para carregar os dados do extintor
+  /// sem precisar conhecer o osId ou o status.
+  Future<Map<String, dynamic>?> buscarItemPorId(String itemId);
 }

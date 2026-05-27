@@ -14,6 +14,31 @@ class UsuarioProvider with ChangeNotifier {
 
   Usuario? get usuario => _usuario;
 
+  // ── Operador ativo ────────────────────────────────────────────────────────
+  // Separado do usuário logado. Quando o app inicia, é igual ao usuário logado.
+  // Pode ser trocado na tela de estação sem fazer logout.
+  // É o nome gravado em todas as operações de produção.
+  Usuario? _operadorAtivo;
+  Usuario? get operadorAtivo => _operadorAtivo ?? _usuario;
+
+  /// Troca o operador ativo. Persiste até ser trocado novamente ou o app fechar.
+  void trocarOperador(Usuario novoOperador) {
+    _operadorAtivo = novoOperador;
+    notifyListeners();
+  }
+
+  /// Reseta o operador ativo para o usuário logado.
+  void resetarOperador() {
+    _operadorAtivo = null;
+    notifyListeners();
+  }
+
+  /// Busca todos os operadores habilitados para uma estação.
+  /// Usado pelo SeletorOperador para montar o dropdown.
+  Future<List<Map<String, dynamic>>> buscarOperadoresPorEstacao(
+      String empresaId, String estacao) =>
+      _repository.buscarOperadoresPorEstacao(empresaId, estacao);
+
   bool _isLoading = true;
   bool get isLoading => _isLoading;
 
@@ -26,6 +51,7 @@ class UsuarioProvider with ChangeNotifier {
         FirebaseAuth.instance.authStateChanges().listen((User? user) {
           if (user == null) {
             _usuario = null;
+            _operadorAtivo = null; // limpa ao fazer logout
             _isLoading = false;
             notifyListeners();
           } else {
@@ -39,6 +65,8 @@ class UsuarioProvider with ChangeNotifier {
       final dados = await _repository.buscarPorId(uid);
       if (dados != null) {
         _usuario = Usuario.fromMap(dados, uid);
+        // Na primeira carga, operador ativo = usuário logado
+        _operadorAtivo ??= _usuario;
       } else {
         debugPrint('ALERTA: Usuário $uid não encontrado no Firestore.');
         _usuario = null;
@@ -79,6 +107,12 @@ class UsuarioProvider with ChangeNotifier {
   /// Atualiza os dados de um usuário.
   Future<void> atualizar(String uid, Map<String, dynamic> dados) =>
       _repository.atualizar(uid, dados);
+
+  /// Chama a Cloud Function [recalcularContadores] para reconstruir o placar
+  /// de contadores do dashboard a partir do zero.
+  /// Usar apenas na inicialização ou para corrigir dessincronias.
+  Future<void> recalcularContadores(String empresaId) =>
+      _repository.recalcularContadores(empresaId);
 
   @override
   void dispose() {

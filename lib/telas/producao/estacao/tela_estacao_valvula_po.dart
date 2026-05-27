@@ -2,9 +2,14 @@
 
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:protecin_producao/models/usuario.dart';
+import 'package:protecin_producao/provider/equipamento_provider.dart';
 import 'package:protecin_producao/provider/item_os_provider.dart';
+import 'package:protecin_producao/provider/usuario_provider.dart';
 import 'package:protecin_producao/widgets/botao_condenar.dart';
 import 'package:protecin_producao/widgets/campo_com_scanner.dart';
+import 'package:protecin_producao/widgets/dialog_pecas_trocadas.dart';
+import 'package:protecin_producao/widgets/seletor_operador.dart';
 
 class TelaEstacaoValvulaPo extends StatefulWidget {
   final String osId;
@@ -27,8 +32,35 @@ class _TelaEstacaoValvulaPoState extends State<TelaEstacaoValvulaPo> {
 
   Future<void> _confirmarValvula(Map<String, dynamic> item) async {
     if (_processando) return;
-    setState(() => _processando = true);
 
+    // ── Captura providers ANTES de qualquer await ──────────────────────────
+    final itemOsProvider      = context.read<ItemOsProvider>();
+    final equipamentoProvider = context.read<EquipamentoProvider>();
+    final empresaId           = context.read<UsuarioProvider>().usuario?.empresaId ?? '';
+
+    // ── Busca o equipamento para ter tipo/capacidade/fabricante ───────────
+    final equipamentoId = item['equipamentoId'] as String? ?? '';
+    final equip = equipamentoId.isNotEmpty
+        ? await equipamentoProvider.buscarPorId(equipamentoId)
+        : null;
+
+    // ── Abre o dialog de peças ─────────────────────────────────────────────
+    if (!mounted) return;
+    final pecasSelecionadas = await mostrarDialogPecasTrocadas(
+      context              : context,
+      // Peças disponíveis na manutenção de válvula Pó
+      legendasDisponiveis  : [1, 4, 9, 13, 15, 16, 20, 26],
+      // O-ring e Pera sempre trocados
+      legendasObrigatorias : [13, 15],
+      tipoEquipamento      : equip?.tipo      ?? item['tipoAgente'] ?? '',
+      capacidadeEquipamento: equip?.capacidade ?? item['capacidade'] ?? '',
+      fabricanteEquipamento: equip?.fabricante ?? '',
+    );
+
+    // Operador cancelou
+    if (pecasSelecionadas == null) return;
+
+    setState(() => _processando = true);
     try {
       final cracha = item['idCrachaTemporario'] ?? '???';
       final List<String> roteiro = List<String>.from(item['roteiro'] ?? []);
@@ -39,12 +71,13 @@ class _TelaEstacaoValvulaPoState extends State<TelaEstacaoValvulaPo> {
       }
       final proximaEstacao = roteiro[index + 1];
 
-      await context.read<ItemOsProvider>().confirmarEtapa(
+      // ── Confirma etapa ─────────────────────────────────────────────────
+      await itemOsProvider.confirmarEtapa(
         itemId: item['id'],
         dadosItem: {
           'manutencao_valvula_po': {
             'data': DateTime.now(),
-            'operador': 'operador_valvula_po',
+            'operador': context.read<UsuarioProvider>().operadorAtivo?.nome ?? 'Operador',
           },
         },
         osId: widget.osId,
@@ -52,6 +85,16 @@ class _TelaEstacaoValvulaPoState extends State<TelaEstacaoValvulaPo> {
         proximaEstacao: proximaEstacao,
         dadosOsExtra: {'dataFimValvulaPo': DateTime.now()},
       );
+
+      // ── Registra peças e baixa estoque ────────────────────────────────
+      if (pecasSelecionadas.isNotEmpty) {
+        await itemOsProvider.registrarPecasTrocadas(
+          itemId   : item['id'],
+          osId     : widget.osId,
+          empresaId: empresaId,
+          pecas    : pecasSelecionadas,
+        );
+      }
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
@@ -73,11 +116,11 @@ class _TelaEstacaoValvulaPoState extends State<TelaEstacaoValvulaPo> {
   Future<void> _processarBipe(String codigo) async {
     if (codigo.isEmpty) return;
     final idCracha = _limparCodigo(codigo);
-
+    final empresaId = context.read<UsuarioProvider>().usuario?.empresaId ?? '';
     final item = await context.read<ItemOsProvider>().buscarItemPorCracha(
       widget.osId,
       idCracha,
-      'aguardando_manutencao_valvula_po',
+      'aguardando_manutencao_valvula_po', empresaId,
     );
 
     if (item != null) {
@@ -86,8 +129,7 @@ class _TelaEstacaoValvulaPoState extends State<TelaEstacaoValvulaPo> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-              content:
-              Text('Crachá não encontrado ou já processado.')),
+              content: Text('Crachá não encontrado ou já processado.')),
         );
       }
     }
@@ -96,16 +138,20 @@ class _TelaEstacaoValvulaPoState extends State<TelaEstacaoValvulaPo> {
 
   @override
   Widget build(BuildContext context) {
+    final empresaId = context.read<UsuarioProvider>().usuario?.empresaId ?? '';
     return Scaffold(
       appBar: AppBar(
         title: Text('Válvula Pó: OS ${widget.osId}'),
         backgroundColor: _corSetor,
         foregroundColor: Colors.white,
-        leading: IconButton(
-          icon: const Icon(Icons.home),
-          onPressed: () =>
-              Navigator.of(context).popUntil((r) => r.isFirst),
-        ),
+        actions: [
+          const SeletorOperador(estacao: EstacaoProducao.valvulaPo),
+          IconButton(
+            icon: const Icon(Icons.home),
+            onPressed: () =>
+                Navigator.of(context).popUntil((r) => r.isFirst),
+          ),
+        ],
       ),
       body: Column(
         children: [
@@ -124,7 +170,7 @@ class _TelaEstacaoValvulaPoState extends State<TelaEstacaoValvulaPo> {
               stream: context
                   .read<ItemOsProvider>()
                   .streamItensPorOsEStatus(
-                  widget.osId, 'aguardando_manutencao_valvula_po'),
+                  widget.osId, 'aguardando_manutencao_valvula_po', empresaId),
               builder: (context, snapshot) {
                 if (!snapshot.hasData) {
                   return const Center(child: CircularProgressIndicator());

@@ -3,44 +3,30 @@
 import 'dart:math';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:protecin_producao/repositories/movimentacao_repository.dart';
+import 'package:protecin_producao/utils/firestore_utils.dart';
 
 class FirestoreMovimentacaoRepository implements MovimentacaoRepository {
   final FirebaseFirestore _db = FirebaseFirestore.instance;
 
   // Converte todos os Timestamp do Firestore para DateTime antes de entregar
   // para as telas. Assim nenhuma tela precisa importar cloud_firestore.
-  Map<String, dynamic> _convertTimestamps(Map<String, dynamic> data) {
-    return data.map((key, value) {
-      if (value is Timestamp) return MapEntry(key, value.toDate());
-      if (value is Map<String, dynamic>) {
-        return MapEntry(key, _convertTimestamps(value));
-      }
-      if (value is List) {
-        return MapEntry(key, value.map((e) {
-          if (e is Timestamp) return e.toDate();
-          if (e is Map<String, dynamic>) return _convertTimestamps(e);
-          return e;
-        }).toList());
-      }
-      return MapEntry(key, value);
-    });
-  }
 
   Map<String, dynamic> _toMap(DocumentSnapshot doc) {
     final raw = <String, dynamic>{
       'id': doc.id,
       ...(doc.data() as Map<String, dynamic>? ?? {}),
     };
-    return _convertTimestamps(raw);
+    return convertTimestamps(raw);
   }
 
   @override
-  Stream<List<Map<String, dynamic>>> streamMovimentacoesFiltradas(
+  @override
+  Future<List<Map<String, dynamic>>> buscarMovimentacoesFiltradas(
       String empresaId, {
         DateTime? dataInicio,
         DateTime? dataFim,
         String? tipo,
-      }) {
+      }) async {
     Query query = _db
         .collection('movimentacoes')
         .where('empresaId', isEqualTo: empresaId)
@@ -60,7 +46,8 @@ class FirestoreMovimentacaoRepository implements MovimentacaoRepository {
       query = query.where('tipo', isEqualTo: tipo);
     }
 
-    return query.snapshots().map((snap) => snap.docs.map(_toMap).toList());
+    final snap = await query.get();
+    return snap.docs.map(_toMap).toList();
   }
 
   @override
@@ -76,37 +63,40 @@ class FirestoreMovimentacaoRepository implements MovimentacaoRepository {
   }
 
   @override
-  Stream<List<Map<String, dynamic>>> streamMovimentacoesPorProduto(
-      String empresaId, String produtoId) {
-    return _db
+  Future<List<Map<String, dynamic>>> buscarMovimentacoesPorProduto(
+      String empresaId, String produtoId) async {
+    final snap = await _db
         .collection('movimentacoes')
         .where('empresaId', isEqualTo: empresaId)
         .where('produtoId', isEqualTo: produtoId)
         .orderBy('data', descending: true)
-        .snapshots()
-        .map((snap) => snap.docs.map(_toMap).toList());
+        .get();
+    return snap.docs.map(_toMap).toList();
   }
 
   @override
-  Stream<List<Map<String, dynamic>>> streamMovimentacoesPorLote(
-      String empresaId, String loteId) {
-    return _db
+  Future<List<Map<String, dynamic>>> buscarMovimentacoesPorLote(
+      String empresaId, String loteId) async {
+    final snap = await _db
         .collection('movimentacoes')
         .where('empresaId', isEqualTo: empresaId)
         .where('loteId', isEqualTo: loteId)
         .orderBy('data', descending: true)
-        .snapshots()
-        .map((snap) => snap.docs.map(_toMap).toList());
+        .get();
+    return snap.docs.map(_toMap).toList();
   }
 
   @override
   Future<List<Map<String, dynamic>>> buscarTodosPorEmpresa(
-      String empresaId) async {
-    final snap = await _db
+      String empresaId, {int? limit}) async {
+    Query query = _db
         .collection('movimentacoes')
         .where('empresaId', isEqualTo: empresaId)
-        .orderBy('data', descending: true)
-        .get();
+        .orderBy('data', descending: true);
+
+    if (limit != null) query = query.limit(limit);
+
+    final snap = await query.get();
     return snap.docs.map(_toMap).toList();
   }
 
@@ -227,7 +217,7 @@ class FirestoreMovimentacaoRepository implements MovimentacaoRepository {
   }
 
   @override
-  Future<void> resetarDadosEmpresa(String empresaId) async {
+  Future<void> resetarDadosEmpresa(String empresaId, String operador) async {
     // Busca tudo primeiro, depois deleta/zera em chunks de 400
     // (limite seguro abaixo do teto de 500 docs/batch do Firestore)
     final movSnap = await _db
@@ -258,6 +248,16 @@ class FirestoreMovimentacaoRepository implements MovimentacaoRepository {
       }
       await batch.commit();
     }
+
+    // Auditoria — registra quem executou e quando
+    await _db.collection('auditoria').add({
+      'acao': 'resetar_dados_empresa',
+      'empresaId': empresaId,
+      'operador': operador,
+      'movimentacoesApagadas': movSnap.docs.length,
+      'produtosZerados': prodSnap.docs.length,
+      'timestamp': FieldValue.serverTimestamp(),
+    });
   }
 
   // ─────────────────────────────────────────────────────────────────────────────
