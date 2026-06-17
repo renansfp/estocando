@@ -22,6 +22,23 @@ class _TelaEstacaoLixaState extends State<TelaEstacaoLixa> {
   final TextEditingController _scannerController = TextEditingController();
   bool _processando = false;
 
+  Stream<List<Map<String, dynamic>>>? _streamItens;
+  String? _empresaIdEscutando;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final empresaId = context.watch<UsuarioProvider>().usuario?.empresaId;
+    if (empresaId != null &&
+        empresaId.isNotEmpty &&
+        empresaId != _empresaIdEscutando) {
+      _empresaIdEscutando = empresaId;
+      _streamItens = context
+          .read<ItemOsProvider>()
+          .streamItensPorOsEStatus(widget.osId, 'aguardando_lixa', empresaId);
+    }
+  }
+
   String _limparCodigo(String valor) {
     String limpo = valor.trim().toUpperCase();
     if (limpo.contains('HTTP')) limpo = limpo.split('/').last;
@@ -99,7 +116,6 @@ class _TelaEstacaoLixaState extends State<TelaEstacaoLixa> {
 
   @override
   Widget build(BuildContext context) {
-    final empresaId = context.read<UsuarioProvider>().usuario?.empresaId ?? '';
     return Scaffold(
       appBar: AppBar(
         title: const Text('Execução: Lixa/Jato'),
@@ -123,9 +139,7 @@ class _TelaEstacaoLixaState extends State<TelaEstacaoLixa> {
           if (_processando) const LinearProgressIndicator(),
           Expanded(
             child: StreamBuilder<List<Map<String, dynamic>>>(
-              stream: context
-                  .read<ItemOsProvider>()
-                  .streamItensPorOsEStatus(widget.osId, 'aguardando_lixa', empresaId),
+              stream: _streamItens,
               builder: (context, snapshot) {
                 if (!snapshot.hasData) {
                   return const Center(child: CircularProgressIndicator());

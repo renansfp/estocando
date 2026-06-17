@@ -21,6 +21,24 @@ class TelaEstacaoLimpeza extends StatefulWidget {
 class _TelaEstacaoLimpezaState extends State<TelaEstacaoLimpeza> {
   final TextEditingController _scannerController = TextEditingController();
 
+  Stream<List<Map<String, dynamic>>>? _streamItens;
+  String? _empresaIdEscutando;
+  List<Map<String, dynamic>> _itensSnapshot = [];
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final empresaId = context.watch<UsuarioProvider>().usuario?.empresaId;
+    if (empresaId != null &&
+        empresaId.isNotEmpty &&
+        empresaId != _empresaIdEscutando) {
+      _empresaIdEscutando = empresaId;
+      _streamItens = context
+          .read<ItemOsProvider>()
+          .streamItensPorOsEStatus(widget.osId, 'aguardando_limpeza', empresaId);
+    }
+  }
+
   String _limparCodigo(String valor) {
     String limpo = valor.trim().toUpperCase();
     if (limpo.contains('HTTP')) limpo = limpo.split('/').last;
@@ -33,22 +51,38 @@ class _TelaEstacaoLimpezaState extends State<TelaEstacaoLimpeza> {
 
     try {
       final empresaId = context.read<UsuarioProvider>().usuario?.empresaId ?? '';
-      final item = await context.read<ItemOsProvider>().buscarItemPorCracha(
-        widget.osId,
-        idCracha,
-        'aguardando_limpeza', empresaId,
-      );
+      // Busca local — scan instantâneo (sem round-trip Firestore)
+      Map<String, dynamic>? item;
+      if (_itensSnapshot.isNotEmpty) {
+        try {
+          item = _itensSnapshot.firstWhere(
+                (i) => i['idCrachaTemporario']?.toString() == idCracha,
+          );
+        } catch (_) {
+          item = null;
+        }
+      }
+      // Fallback ao Firestore apenas se o snapshot ainda não chegou
+      if (item == null && _itensSnapshot.isEmpty) {
+        item = await context.read<ItemOsProvider>().buscarItemPorCracha(
+          widget.osId, idCracha, 'aguardando_limpeza', empresaId,
+        );
+      }
+
 
       if (item != null) {
         if (!mounted) return;
+        // item é variável mutável — Dart não promove em closures.
+        // Copia para final antes do builder para garantir promoção de tipo.
+        final itemEncontrado = item;
         Navigator.push(
           context,
           MaterialPageRoute(
             builder: (context) => TelaTriagemLimpeza(
-              itemOsId: item['id'],
+              itemOsId: itemEncontrado['id'],
               idRastreio: idCracha,
-              tipoAgente: item['tipoAgente'] ?? '?',
-              equipamentoId: item['equipamentoId'] ?? '',
+              tipoAgente: itemEncontrado['tipoAgente'] ?? '?',
+              equipamentoId: itemEncontrado['equipamentoId'] ?? '',
               osId: widget.osId,
             ),
           ),
@@ -67,7 +101,6 @@ class _TelaEstacaoLimpezaState extends State<TelaEstacaoLimpeza> {
 
   @override
   Widget build(BuildContext context) {
-    final empresaId = context.read<UsuarioProvider>().usuario?.empresaId ?? '';
     return Scaffold(
       appBar: AppBar(
         title: const Text('Estação: Limpeza & Triagem'),
@@ -92,13 +125,12 @@ class _TelaEstacaoLimpezaState extends State<TelaEstacaoLimpeza> {
           const Divider(height: 1),
           Expanded(
             child: StreamBuilder<List<Map<String, dynamic>>>(
-              stream: context
-                  .read<ItemOsProvider>()
-                  .streamItensPorOsEStatus(widget.osId, 'aguardando_limpeza', empresaId),
+              stream: _streamItens,
               builder: (context, snapshot) {
                 if (!snapshot.hasData) {
                   return const Center(child: CircularProgressIndicator());
                 }
+                _itensSnapshot = snapshot.data!;
                 final itens = snapshot.data!;
                 if (itens.isEmpty) return _buildTelaConclusao();
 

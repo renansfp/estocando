@@ -15,6 +15,10 @@ class EquipamentoProvider with ChangeNotifier {
   String? _erro;
   StreamSubscription<List<Equipamento>>? _subscription;
 
+  // Cache em memória — elimina round-trip Firestore na segunda abertura
+  // do mesmo extintor. Invalidado ao trocar de empresa ou fazer logout.
+  final Map<String, Equipamento> _cacheById = {};
+
   List<Equipamento> get equipamentos => _equipamentos;
   bool get isLoading => _isLoading;
   String? get erro => _erro;
@@ -64,10 +68,15 @@ class EquipamentoProvider with ChangeNotifier {
   void pararEscuta() {
     _subscription?.cancel();
     _subscription = null;
+    _cacheById.clear();
   }
 
-  Future<Equipamento?> buscarPorId(String id) =>
-      _repository.buscarPorId(id);
+  Future<Equipamento?> buscarPorId(String id) async {
+    if (_cacheById.containsKey(id)) return _cacheById[id];
+    final result = await _repository.buscarPorId(id);
+    if (result != null) _cacheById[id] = result;
+    return result;
+  }
 
   Future<bool> verificarDisponibilidade(String equipamentoId) {
     return _repository.verificarDisponibilidade(equipamentoId);

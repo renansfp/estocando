@@ -13,9 +13,6 @@ class FirestoreOrdemServicoRepository implements OrdemServicoRepository {
   FirestoreOrdemServicoRepository({FirebaseFirestore? firestore})
       : _db = firestore ?? FirebaseFirestore.instance;
 
-  // Converte todos os Timestamp do Firestore para DateTime antes de entregar
-  // para as telas. Assim nenhuma tela precisa importar cloud_firestore.
-
   Map<String, dynamic> _toMap(DocumentSnapshot doc) {
     final raw = <String, dynamic>{
       'id': doc.id,
@@ -31,9 +28,6 @@ class FirestoreOrdemServicoRepository implements OrdemServicoRepository {
     required Parceiro cliente,
     required String observacoes,
   }) async {
-    // Proteção contra OS gigantesca que excederia o limite do Firestore.
-    // Cada item gera 2 escritas (item_os + equipamento). Soma-se 2 fixas
-    // (OS + contador) → limite seguro de 249 itens por OS.
     if (itens.length > 249) {
       throw Exception(
         'Uma OS não pode ter mais de 249 itens. '
@@ -43,20 +37,8 @@ class FirestoreOrdemServicoRepository implements OrdemServicoRepository {
 
     final configRef = _db.collection('config').doc('contadores');
 
-    // Pré-gera as referências dos itens fora da transação
-    // (criar uma DocumentReference com doc() é uma operação local — não toca o banco).
-    // Isso é necessário porque precisamos dos IDs antes de entrar na transação.
-    final itenRefs = List.generate(
-      itens.length,
-          (_) => _db.collection('itens_os').doc(),
-    );
-
     late String idFormatado;
 
-    // runTransaction garante que a leitura + escrita do contador são atômicas.
-    // Se dois usuários criarem uma OS ao mesmo tempo, o Firestore detecta
-    // o conflito e retenta automaticamente — nunca dois processos pegam
-    // o mesmo número.
     await _db.runTransaction((transaction) async {
       // ── 1. Lê o contador DENTRO da transação ─────────────────────────────
       final configDoc = await transaction.get(configRef);
@@ -81,21 +63,28 @@ class FirestoreOrdemServicoRepository implements OrdemServicoRepository {
       osMap['quantidadeTotal'] = itens.length;
       osMap['numeroSequencial'] = proximoNumero;
       osMap['observacoes'] = observacoes;
-      // ── Placar de pendentes por etapa — elimina queries de contagem ──────
-      // Cada chave representa um status de item_os. Decrementado a cada
-      // confirmarEtapa/confirmarTriagem/expedirItem. Quando chega a zero,
-      // a OS avança automaticamente. Mantemos chaves antigas zeradas para
-      // facilitar debug no Firebase Console.
       osMap['pendentes'] = {'aguardando_descarga': itens.length};
       transaction.set(osRef, osMap);
 
-      // ── 3. Cria os itens e atualiza os equipamentos ───────────────────────
+      // ── 3. Gera as referências dos itens DENTRO da transação ──────────────
+      // Só agora conhecemos o idFormatado, então as refs da subcoleção
+      // são geradas aqui. doc() sem argumento é operação local — sem rede.
+      final itenRefs = List.generate(
+        itens.length,
+            (_) => _db
+            .collection('ordens_servico')
+            .doc(idFormatado)
+            .collection('itens')
+            .doc(),
+      );
+
+      // ── 4. Cria os itens na subcoleção e atualiza os equipamentos ─────────
       for (int i = 0; i < itens.length; i++) {
         final item = itens[i];
         final itemRef = itenRefs[i];
 
         final itemJson = item.toJson();
-        itemJson['osId'] = idFormatado;
+        itemJson['osId'] = idFormatado;       // mantido para collectionGroup
         itemJson['numeroOS'] = idFormatado;
         itemJson['clienteNome'] = cliente.nome;
         itemJson['status'] = 'aguardando_descarga';
@@ -116,10 +105,18 @@ class FirestoreOrdemServicoRepository implements OrdemServicoRepository {
         );
       }
 
-      // ── 4. Atualiza o contador — última escrita da transação ──────────────
+      // ── 5. Atualiza o contador de OS e os contadores do dashboard ────────
       transaction.set(
         configRef,
         {'ultima_os': proximoNumero},
+        SetOptions(merge: true),
+      );
+
+      // descarga += N — o documento é criado se não existir (merge: true)
+      final contadoresRef = _db.collection('contadores').doc(os.empresaId);
+      transaction.set(
+        contadoresRef,
+        {'descarga': FieldValue.increment(itens.length)},
         SetOptions(merge: true),
       );
     });
@@ -143,11 +140,6 @@ class FirestoreOrdemServicoRepository implements OrdemServicoRepository {
       String empresaId, {
         bool somentAbertas = false,
       }) {
-    // Quando somentAbertas = true, filtra no Firestore por documentos onde
-    // dataEncerramento ainda não foi gravado (campo ausente = OS em aberto).
-    // Isso evita baixar OS finalizadas que podem ser a maioria do banco.
-    // Usa isNull: true em vez de isNotEqualTo para preservar o orderBy
-    // em dataEntrada sem a restrição de ordenação do Firestore.
     Query<Map<String, dynamic>> query = _db
         .collection('ordens_servico')
         .where('empresaId', isEqualTo: empresaId);
@@ -172,12 +164,9 @@ class FirestoreOrdemServicoRepository implements OrdemServicoRepository {
     return snap.docs.map(_toMap).toList();
   }
 
-  // ─── Novo método ─────────────────────────────────────────────────────────
-
   @override
   Future<Map<String, dynamic>?> buscarPorNumero(
       String empresaId, String numeroOS) async {
-    // Tenta com o número exato primeiro
     var query = await _db
         .collection('ordens_servico')
         .where('empresaId', isEqualTo: empresaId)
@@ -185,7 +174,6 @@ class FirestoreOrdemServicoRepository implements OrdemServicoRepository {
         .limit(1)
         .get();
 
-    // Se não encontrou e o número é curto, tenta com zero-padding (ex: "105" → "00105")
     if (query.docs.isEmpty && numeroOS.length < 5) {
       query = await _db
           .collection('ordens_servico')
@@ -212,7 +200,6 @@ class FirestoreOrdemServicoRepository implements OrdemServicoRepository {
       return _toMap(doc);
     });
   }
-
 
   @override
   Future<OrdemServico?> buscarPorId(String osId) async {

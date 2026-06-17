@@ -8,6 +8,10 @@ class ProdutoProvider with ChangeNotifier {
 
   ProdutoProvider(this._repository);
 
+  // Cache em memória — elimina round-trip Firestore para o mesmo produto
+  // na mesma sessão. Key: '$empresaId:$codigo'.
+  final Map<String, Map<String, dynamic>?> _cachePorCodigo = {};
+
   Stream<List<Map<String, dynamic>>> streamProdutosComControleLote(
       String empresaId) =>
       _repository.streamProdutosComControleLote(empresaId);
@@ -24,8 +28,13 @@ class ProdutoProvider with ChangeNotifier {
       _repository.buscarTodosPorEmpresa(empresaId);
 
   Future<Map<String, dynamic>?> buscarPorCodigo(
-      String empresaId, String codigo) =>
-      _repository.buscarPorCodigo(empresaId, codigo);
+      String empresaId, String codigo) async {
+    final key = '$empresaId:$codigo';
+    if (_cachePorCodigo.containsKey(key)) return _cachePorCodigo[key];
+    final result = await _repository.buscarPorCodigo(empresaId, codigo);
+    _cachePorCodigo[key] = result;
+    return result;
+  }
 
   Stream<List<Map<String, dynamic>>> streamLotesPorProduto(
       String produtoId) =>

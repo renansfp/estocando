@@ -15,6 +15,16 @@ class TelaEstacaoExpedicao extends StatefulWidget {
 class _TelaEstacaoExpedicaoState extends State<TelaEstacaoExpedicao> {
   final TextEditingController _scannerController = TextEditingController();
   bool _carregando = false;
+  List<Map<String, dynamic>> _itensSnapshot = [];
+
+  // Stream estável — criada uma vez no initState (streamItensPorOs não depende de empresaId).
+  late final Stream<List<Map<String, dynamic>>> _streamItens;
+
+  @override
+  void initState() {
+    super.initState();
+    _streamItens = context.read<ItemOsProvider>().streamItensPorOs(widget.osId);
+  }
 
   String _limparCodigo(String valor) {
     String limpo = valor.trim().toUpperCase();
@@ -33,11 +43,24 @@ class _TelaEstacaoExpedicaoState extends State<TelaEstacaoExpedicao> {
 
     try {
       final empresaId = context.read<UsuarioProvider>().usuario?.empresaId ?? '';
-      final item = await provider.buscarItemPorCracha(
-        widget.osId,
-        idCracha,
-        'aguardando_expedicao', empresaId,
-      );
+      // Busca local — scan instantâneo (sem round-trip Firestore)
+      Map<String, dynamic>? item;
+      if (_itensSnapshot.isNotEmpty) {
+        try {
+          item = _itensSnapshot.firstWhere(
+                (i) => i['idCrachaTemporario']?.toString() == idCracha,
+          );
+        } catch (_) {
+          item = null;
+        }
+      }
+      // Fallback ao Firestore apenas se o snapshot ainda não chegou
+      if (item == null && _itensSnapshot.isEmpty) {
+        item = await provider.buscarItemPorCracha(
+          widget.osId, idCracha, 'aguardando_expedicao', empresaId,
+        );
+      }
+
 
       if (item != null) {
         await provider.expedirItem(
@@ -92,14 +115,13 @@ class _TelaEstacaoExpedicaoState extends State<TelaEstacaoExpedicao> {
           Expanded(
             child: StreamBuilder<List<Map<String, dynamic>>>(
               // Busca todos os itens da OS — sem filtro de status
-              stream: context
-                  .read<ItemOsProvider>()
-                  .streamItensPorOs(widget.osId),
+              stream: _streamItens,
               builder: (context, snapshot) {
                 if (!snapshot.hasData) {
                   return const Center(child: CircularProgressIndicator());
                 }
 
+                _itensSnapshot = snapshot.data!;
                 final totalItens = snapshot.data!;
                 final expedidos = totalItens
                     .where((d) => d['status'] == 'entregue')

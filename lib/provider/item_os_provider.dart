@@ -11,10 +11,13 @@ class ItemOsProvider with ChangeNotifier {
 
   Map<String, int> _contadores = {};
   StreamSubscription<Map<String, int>>? _subscription;
+  String _empresaId = '';
 
   Map<String, int> get contadores => _contadores;
+  String get empresaId => _empresaId;
 
   void iniciarEscuta(String empresaId) {
+    _empresaId = empresaId;
     _subscription?.cancel();
     _subscription = _repository
         .streamDocumentoContadores(empresaId)
@@ -33,7 +36,7 @@ class ItemOsProvider with ChangeNotifier {
     required String operador,
   }) =>
       _repository.liberarLotePremontagem(
-          osId: osId, itens: itens, operador: operador);
+          osId: osId, itens: itens, operador: operador, empresaId: _empresaId);
 
   Future<void> criarPrintJob({
     required List<String> itensIds,
@@ -58,6 +61,7 @@ class ItemOsProvider with ChangeNotifier {
     required String pesoVazio,
     required String pesoCheioMeta,
     required String proximaEstacao,
+    required String statusAtualItem,
   }) =>
       _repository.salvarManutencaoValvula(
         itemId: itemId,
@@ -67,6 +71,8 @@ class ItemOsProvider with ChangeNotifier {
         pesoVazio: pesoVazio,
         pesoCheioMeta: pesoCheioMeta,
         proximaEstacao: proximaEstacao,
+        statusAtualItem: statusAtualItem,
+        empresaId: _empresaId,
       );
 
   Stream<List<Map<String, dynamic>>> streamItensPorOs(String osId) =>
@@ -79,17 +85,22 @@ class ItemOsProvider with ChangeNotifier {
     required String? equipId,
   }) =>
       _repository.expedirItem(
-          itemId: itemId, osId: osId, idCracha: idCracha, equipId: equipId);
+          itemId: itemId, osId: osId, idCracha: idCracha, equipId: equipId, empresaId: _empresaId);
 
   Future<void> reprovarItem({
     required String itemId,
+    required String osId,
+    required String statusAtual,
     required String statusDestino,
     required Map<String, dynamic> dadosFalha,
   }) =>
       _repository.reprovarItem(
           itemId: itemId,
+          osId: osId,
+          statusAtual: statusAtual,
           statusDestino: statusDestino,
-          dadosFalha: dadosFalha);
+          dadosFalha: dadosFalha,
+          empresaId: _empresaId);
 
   Stream<List<Map<String, dynamic>>> streamItensAguardandoDescarga(
       String empresaId, List<String> filtrosAgente) =>
@@ -97,16 +108,15 @@ class ItemOsProvider with ChangeNotifier {
 
   Stream<List<Map<String, dynamic>>> streamItensPorOsEStatus(
       String osId, String status, String empresaId) =>
-      _repository.streamItensPorOsEStatus(osId, status,empresaId);
+      _repository.streamItensPorOsEStatus(osId, status, empresaId);
 
   Future<Map<String, dynamic>?> buscarItemPorCracha(
       String osId, String cracha, String status, String empresaId) =>
-      _repository.buscarItemPorCracha(osId, cracha, status,empresaId);
+      _repository.buscarItemPorCracha(osId, cracha, status, empresaId);
 
   Future<Map<String, dynamic>?> buscarItemPorCrachaEOsId(
       String osId, String cracha, String empresaId) =>
       _repository.buscarItemPorCrachaEOsId(osId, cracha, empresaId);
-
 
   Future<void> processarRecarga({
     required String itemId,
@@ -125,6 +135,7 @@ class ItemOsProvider with ChangeNotifier {
     required String? clienteNome,
     required String cc,
     required String operador,
+    required String statusAtualItem,
   }) =>
       _repository.processarRecarga(
         itemId: itemId,
@@ -143,6 +154,8 @@ class ItemOsProvider with ChangeNotifier {
         clienteNome: clienteNome,
         cc: cc,
         operador: operador,
+        empresaId: _empresaId,
+        statusAtualItem: statusAtualItem,
       );
 
   Future<void> confirmarEtapa({
@@ -159,12 +172,10 @@ class ItemOsProvider with ChangeNotifier {
         osId: osId,
         statusPendente: statusPendente,
         proximaEstacao: proximaEstacao,
+        empresaId: _empresaId,
         dadosOsExtra: dadosOsExtra,
       );
 
-  // ─── Novo método ─────────────────────────────────────────────────────────
-
-  /// Condena um item em batch atômico (atualiza item + baixa equipamento).
   Future<void> condenarItem({
     required String itemId,
     required Map<String, dynamic> item,
@@ -176,6 +187,7 @@ class ItemOsProvider with ChangeNotifier {
         item: item,
         etapa: etapa,
         motivo: motivo,
+        empresaId: _empresaId,
       );
 
   Future<void> confirmarTriagem({
@@ -197,11 +209,13 @@ class ItemOsProvider with ChangeNotifier {
         precisaPintura: precisaPintura,
         testeVencido: testeVencido,
         operador: operador,
+        empresaId: _empresaId,
       );
 
-  /// Finaliza o ensaio hidrostático, atualizando item e equipamento.
+  /// [osId] obrigatório — localiza o item na subcoleção correta.
   Future<void> finalizarEnsaioTH({
     required String itemId,
+    required String osId,
     required String? equipamentoId,
     required bool aprovado,
     required String proximaEtapa,
@@ -210,38 +224,36 @@ class ItemOsProvider with ChangeNotifier {
   }) =>
       _repository.finalizarEnsaioTH(
         itemId: itemId,
+        osId: osId,
         equipamentoId: equipamentoId,
         aprovado: aprovado,
         proximaEtapa: proximaEtapa,
         dadosTH: dadosTH,
         updatesEquipamento: updatesEquipamento,
+        empresaId: _empresaId,
       );
 
-  /// Stream de itens na descarga (aguardando_descarga ou descarga_concluida).
   Stream<List<Map<String, dynamic>>> streamItensDescarga(String empresaId) =>
       _repository.streamItensDescarga(empresaId);
 
-  /// Libera um lote para a limpeza (atualiza itens + OS mãe).
   Future<void> liberarLoteParaLimpeza({
     required String osId,
     required List<String> itemIds,
   }) =>
-      _repository.liberarLoteParaLimpeza(osId: osId, itemIds: itemIds);
+      _repository.liberarLoteParaLimpeza(osId: osId, itemIds: itemIds, empresaId: _empresaId);
 
-  /// Reverte itens da limpeza de volta para a descarga (admin).
-  Future<void> reverterParaDescarga(String osId) =>
-      _repository.reverterParaDescarga(osId);
+  Future<void> reverterParaDescarga(String osId, String empresaId) =>
+      _repository.reverterParaDescarga(osId, empresaId);
 
-  /// Marca um item como descarga concluída.
-  Future<void> confirmarDescargaItem(String itemOsId, String operador) =>
-      _repository.confirmarDescargaItem(itemOsId, operador);
+  /// [osId] obrigatório — localiza o item na subcoleção correta.
+  Future<void> confirmarDescargaItem(
+      String itemOsId, String osId, String operador) =>
+      _repository.confirmarDescargaItem(itemOsId, osId, operador);
 
-  /// Confirma a descarga de um item pelo crachá, avançando a OS se necessário.
   Future<void> confirmarDescargaPorCracha(
       String osId, String idCracha, String operador) =>
-      _repository.confirmarDescargaPorCracha(osId, idCracha, operador);
+      _repository.confirmarDescargaPorCracha(osId, idCracha, operador, _empresaId);
 
-  /// Stream de itens aguardando descarga em uma OS, filtrado por agente.
   Stream<List<Map<String, dynamic>>> streamItensDescargaOsPorAgente(
       String osId, List<String> filtrosAgente) =>
       _repository.streamItensDescargaOsPorAgente(osId, filtrosAgente);
@@ -252,10 +264,9 @@ class ItemOsProvider with ChangeNotifier {
     super.dispose();
   }
 
-
-  Future<List<Map<String, dynamic>>> buscarItensComDadosCompletos(String osId) =>
+  Future<List<Map<String, dynamic>>> buscarItensComDadosCompletos(
+      String osId) =>
       _repository.buscarItensComDadosCompletos(osId);
-
 
   Future<bool> verificarCrachaEmUso(String idCracha, String empresaId) =>
       _repository.verificarCrachaEmUso(idCracha, empresaId);
@@ -264,8 +275,10 @@ class ItemOsProvider with ChangeNotifier {
       String idCracha, String empresaId) =>
       _repository.buscarInfoCracha(idCracha, empresaId);
 
-  Future<Map<String, dynamic>?> buscarItemPorId(String itemId) =>
-      _repository.buscarItemPorId(itemId);
+  /// [osId] obrigatório — localiza o item na subcoleção correta.
+  Future<Map<String, dynamic>?> buscarItemPorId(
+      String itemId, String osId) =>
+      _repository.buscarItemPorId(itemId, osId);
 
   Future<void> registrarPecasTrocadas({
     required String itemId,
@@ -274,10 +287,27 @@ class ItemOsProvider with ChangeNotifier {
     required Map<int, String> pecas,
   }) async {
     await _repository.registrarPecasTrocadas(
-      itemId    : itemId,
-      osId      : osId,
-      empresaId : empresaId,
-      pecas     : pecas,
+      itemId: itemId,
+      osId: osId,
+      empresaId: empresaId,
+      pecas: pecas,
     );
   }
+
+  Future<void> reverterLote({
+    required String osId,
+    required String empresaId,
+    required String statusAtual,
+    required String statusAnterior,
+    required Map<String, dynamic> dadosOS,
+    String Function(Map<String, dynamic>)? statusAnteriorFn,
+  }) =>
+      _repository.reverterLote(
+        osId: osId,
+        empresaId: empresaId,
+        statusAtual: statusAtual,
+        statusAnterior: statusAnterior,
+        dadosOS: dadosOS,
+        statusAnteriorFn: statusAnteriorFn,
+      );
 }

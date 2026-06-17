@@ -22,6 +22,23 @@ class TelaEstacaoDescarga extends StatefulWidget {
 }
 
 class _TelaEstacaoDescargaState extends State<TelaEstacaoDescarga> {
+  Stream<List<Map<String, dynamic>>>? _streamItens;
+  String? _empresaIdEscutando;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final empresaId = context.watch<UsuarioProvider>().usuario?.empresaId;
+    if (empresaId != null &&
+        empresaId.isNotEmpty &&
+        empresaId != _empresaIdEscutando) {
+      _empresaIdEscutando = empresaId;
+      _streamItens = context
+          .read<ItemOsProvider>()
+          .streamItensAguardandoDescarga(empresaId, widget.filtrosAgente);
+    }
+  }
+
   String _obterIdCurto(String idCompleto) {
     return idCompleto.length >= 5
         ? idCompleto.substring(idCompleto.length - 5).toUpperCase()
@@ -30,11 +47,6 @@ class _TelaEstacaoDescargaState extends State<TelaEstacaoDescarga> {
 
   @override
   Widget build(BuildContext context) {
-    final usuario = Provider.of<UsuarioProvider>(context, listen: false).usuario;
-    if (usuario == null) {
-      return const Scaffold(body: Center(child: Text('Erro de usuário')));
-    }
-
     return Scaffold(
       appBar: AppBar(
         title: Text(widget.tituloEstacao),
@@ -47,10 +59,7 @@ class _TelaEstacaoDescargaState extends State<TelaEstacaoDescarga> {
         ),
       ),
       body: StreamBuilder<List<Map<String, dynamic>>>(
-        stream: context.read<ItemOsProvider>().streamItensAguardandoDescarga(
-          usuario.empresaId,
-          widget.filtrosAgente,
-        ),
+        stream: _streamItens,
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting) {
             return const Center(child: CircularProgressIndicator());

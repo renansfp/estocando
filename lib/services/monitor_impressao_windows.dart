@@ -2,8 +2,8 @@ import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'dart:io';
 import 'dart:typed_data';
-import 'package:flutter/widgets.dart'; // <--- ADICIONE ESTA LINHA
-import 'package:printing/printing.dart'; // Essencial para Windows
+import 'package:flutter/widgets.dart';
+import 'package:printing/printing.dart';
 import 'package:pdf/pdf.dart';
 import 'package:protecin_producao/utils/impressao_argox.dart';
 
@@ -27,7 +27,6 @@ class MonitorImpressaoWindows {
         .where('status', isEqualTo: 'pending')
         .snapshots()
         .listen((snapshot) {
-      // Resolve o erro de thread no Windows
       WidgetsBinding.instance.addPostFrameCallback((_) {
         for (var change in snapshot.docChanges) {
           if (change.type == DocumentChangeType.added) {
@@ -54,46 +53,69 @@ class MonitorImpressaoWindows {
         final docJob = _filaLocal.first;
         final dadosJob = docJob.data() as Map<String, dynamic>;
 
-        // O SEGREDO: Usar WidgetsBinding para garantir que o log e a busca
-        // rodem na thread correta do Windows
         await Future.delayed(Duration.zero);
 
-        onLog("🛠️ Fabricando lote da OS ${dadosJob['osId']}...");
+        final osId = dadosJob['osId']?.toString() ?? '';
+        onLog("🛠️ Fabricando lote da OS $osId...");
         await docJob.reference.update({'status': 'processing'});
 
         List<Map<String, dynamic>> listaParaLote = [];
         List<dynamic> ids = dadosJob['itensIds'] ?? [];
 
+        // Calcula datas de manutenção a partir da data atual do serviço
+        final dataServico = DateTime.now();
+        final n2 = DateTime(dataServico.year + 2, dataServico.month);
+        final n3 = DateTime(dataServico.year + 5, dataServico.month);
+        final proximaManutencaoN2 =
+            '${n2.month.toString().padLeft(2, '0')}/${n2.year}';
+        final proximaManutencaoN3 = '${n3.year}';
+
         for (String id in ids) {
-          // Busca o item garantindo que não trave a thread
-          var docItem = await FirebaseFirestore.instance.collection('itens_os').doc(id).get();
+          // MIGRAÇÃO: item agora está na subcoleção da OS
+          // Caminho: ordens_servico/{osId}/itens/{itemId}
+          final docItem = await FirebaseFirestore.instance
+              .collection('ordens_servico')
+              .doc(osId)
+              .collection('itens')
+              .doc(id)
+              .get();
 
           if (docItem.exists) {
             final data = docItem.data()!;
+
+            // CORREÇÃO: usar 'capacidade' em vez de 'peso' (campo correto do item)
+            final capacidade = data['capacidade'] ?? data['peso'] ?? '';
+            final tipoAgente = data['tipoAgente'] ?? '';
+
             Map<String, dynamic> infoBase = {
               'clienteNome': data['clienteNome'] ?? "CLIENTE",
-              'tipoExtintor': "${data['tipoAgente'] ?? ''} ${data['peso'] ?? ''} KG",
-              'lote': dadosJob['osId'].toString(),
+              'tipoExtintor': '$tipoAgente $capacidade KG'.trim(),
+              'lote': osId,
               'numeroFabricacao': data['ativoFixo'] ?? data['numeroCilindro'] ?? "S/N",
-              'proximaManutencaoN2': "12/2026",
-              'proximaManutencaoN3': "2031",
+              'proximaManutencaoN2': proximaManutencaoN2,
+              'proximaManutencaoN3': proximaManutencaoN3,
               'servicoRealizado': data['servico_realizado'] ?? "Manutencao",
             };
 
-            if (dadosJob['imprimirGarantia'] == true) listaParaLote.add({'tipo': 'Garantia', ...infoBase});
-            if (dadosJob['imprimirNR23'] == true) listaParaLote.add({'tipo': 'NR23', ...infoBase});
+            if (dadosJob['imprimirGarantia'] == true) {
+              listaParaLote.add({'tipo': 'Garantia', ...infoBase});
+            }
+            if (dadosJob['imprimirNR23'] == true) {
+              listaParaLote.add({'tipo': 'NR23', ...infoBase});
+            }
           }
         }
 
         if (listaParaLote.isNotEmpty) {
-          final pdfBytes = await ImpressaoArgox.gerarLoteEtiquetas(dadosEtiquetas: listaParaLote);
+          final pdfBytes = await ImpressaoArgox.gerarLoteEtiquetas(
+              dadosEtiquetas: listaParaLote);
 
-          // No Windows, o Printing.layoutPdf precisa rodar na thread principal
           await Printing.layoutPdf(
             onLayout: (format) async => pdfBytes,
-            name: 'Lote_OS_${dadosJob['osId']}',
-            format: const PdfPageFormat(100 * PdfPageFormat.mm, 50 * PdfPageFormat.mm),
-            usePrinterSettings: true, // <--- ADICIONE ISSO: Força a usar o que está no Driver
+            name: 'Lote_OS_$osId',
+            format: const PdfPageFormat(
+                100 * PdfPageFormat.mm, 50 * PdfPageFormat.mm),
+            usePrinterSettings: true,
           );
 
           await docJob.reference.update({'status': 'printed'});
@@ -109,10 +131,8 @@ class MonitorImpressaoWindows {
     _ocupadoImprimindo = false;
   }
 
-
   // Mantida como referência. Remover se confirmar que não será usada.
   // FUNÇÃO DESATIVADA — não está sendo chamada em nenhum lugar.
-  // ─────────────────────────────────────────────────────────────────────
   // ignore: unused_element
   Future<void> _imprimirEtiquetaUnica(DocumentSnapshot doc) async {
     final Map<String, dynamic> dadosDoc = doc.data() as Map<String, dynamic>;
@@ -122,19 +142,18 @@ class MonitorImpressaoWindows {
       final List<dynamic> listaComando = dadosDoc['command_list'];
       final Uint8List bytesPdf = Uint8List.fromList(listaComando.cast<int>());
 
-      // Salva o PDF temporário
       final String tempPath = '${Directory.systemTemp.path}/job_${doc.id}.pdf';
       final tempFile = File(tempPath);
       await tempFile.writeAsBytes(bytesPdf);
 
-      // Executa o SumatraPDF
-      String pathSumatra = "${Directory.current.path}\\lib\\services\\SumatraPDF.exe";
+      String pathSumatra =
+          "${Directory.current.path}\\lib\\services\\SumatraPDF.exe";
 
       onLog("🚀 Chamando Sumatra em: $pathSumatra");
 
       final result = await Process.run(pathSumatra, [
-        '-print-dialog', // Abre a janela oficial do Windows
-        '-exit-when-done', // Fecha o Sumatra depois que mandar pro spooler
+        '-print-dialog',
+        '-exit-when-done',
         '-print-settings',
         'paper="Etiqueta Protecin (100.0 mm x 50.0 mm)",noscale',
         tempPath

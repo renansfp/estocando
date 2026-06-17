@@ -23,6 +23,25 @@ class _TelaEstacaoSaqueState extends State<TelaEstacaoSaque> {
   final Color _corSetor = Colors.red.shade700;
   final TextEditingController _scannerController = TextEditingController();
 
+  Stream<List<Map<String, dynamic>>>? _streamItens;
+  String? _empresaIdEscutando;
+  List<Map<String, dynamic>> _itensSnapshot = [];
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final empresaId = context.watch<UsuarioProvider>().usuario?.empresaId;
+    if (empresaId != null &&
+        empresaId.isNotEmpty &&
+        empresaId != _empresaIdEscutando) {
+      _empresaIdEscutando = empresaId;
+      _streamItens = context
+          .read<ItemOsProvider>()
+          .streamItensPorOsEStatus(
+          widget.numeroLote, 'aguardando_saque_valvula', empresaId);
+    }
+  }
+
   String _limparCodigo(String valor) {
     String limpo = valor.trim().toUpperCase();
     if (limpo.contains('HTTP')) limpo = limpo.split('/').last;
@@ -33,11 +52,24 @@ class _TelaEstacaoSaqueState extends State<TelaEstacaoSaque> {
     String idLimpo = _limparCodigo(codigo);
     _scannerController.clear();
     final empresaId = context.read<UsuarioProvider>().usuario?.empresaId ?? '';
-    final item = await context.read<ItemOsProvider>().buscarItemPorCracha(
-      widget.numeroLote,
-      idLimpo,
-      'aguardando_saque_valvula', empresaId
-    );
+    // Busca local — scan instantâneo (sem round-trip Firestore)
+    Map<String, dynamic>? item;
+    if (_itensSnapshot.isNotEmpty) {
+      try {
+        item = _itensSnapshot.firstWhere(
+              (i) => i['idCrachaTemporario']?.toString() == idLimpo,
+        );
+      } catch (_) {
+        item = null;
+      }
+    }
+    // Fallback ao Firestore apenas se o snapshot ainda não chegou
+    if (item == null && _itensSnapshot.isEmpty) {
+      item = await context.read<ItemOsProvider>().buscarItemPorCracha(
+        widget.numeroLote, idLimpo, 'aguardando_saque_valvula', empresaId,
+      );
+    }
+
 
     if (item != null) {
       _mostrarDialogoExecucao(item);
@@ -127,7 +159,6 @@ class _TelaEstacaoSaqueState extends State<TelaEstacaoSaque> {
 
   @override
   Widget build(BuildContext context) {
-    final empresaId = context.read<UsuarioProvider>().usuario?.empresaId ?? '';
     return Scaffold(
       appBar: AppBar(
         title: const Text('Execução: Saque'),
@@ -169,14 +200,12 @@ class _TelaEstacaoSaqueState extends State<TelaEstacaoSaque> {
           ),
           Expanded(
             child: StreamBuilder<List<Map<String, dynamic>>>(
-              stream: context
-                  .read<ItemOsProvider>()
-                  .streamItensPorOsEStatus(
-                  widget.numeroLote, 'aguardando_saque_valvula', empresaId),
+              stream: _streamItens,
               builder: (context, snapshot) {
                 if (!snapshot.hasData) {
                   return const Center(child: CircularProgressIndicator());
                 }
+                _itensSnapshot = snapshot.data!;
                 final itens = snapshot.data!;
                 if (itens.isEmpty) {
                   return const Center(child: Text('Lote concluído!'));

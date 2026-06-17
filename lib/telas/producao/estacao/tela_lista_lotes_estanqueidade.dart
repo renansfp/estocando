@@ -64,7 +64,27 @@ class TelaListaLotesEstanqueidade extends StatelessWidget {
       nomeSetorCC: nomeSetorCC,
       mostrarBotaoReverter: true,
       statusParaReverter: 'aguardando_estanqueidade',
-      statusAnteriorReverter: 'aguardando_recarga',
+      // ── CORREÇÃO BUG: reverter estanqueidade → recarga correto por agente ──
+      // Antes: statusAnteriorReverter: 'aguardando_recarga' (genérico)
+      // As telas de recarga filtram por 'aguardando_recarga_co2/abc/bc',
+      // então o genérico fazia todos os itens desaparecerem.
+      // Agora: deriva o status correto lendo o roteiro de cada item.
+      //   roteiro CO2: [..., 'recarga_co2', 'estanqueidade_co2', ...]
+      //   roteiro ABC: [..., 'recarga_abc', 'estanqueidade_abc', ...]
+      //   roteiro BC:  [..., 'recarga_bc',  'estanqueidade_bc',  ...]
+      // A etapa imediatamente ANTES da estanqueidade no roteiro é sempre a recarga.
+      statusAnteriorReverterFn: (item) {
+        final roteiro = List<String>.from(item['roteiro'] ?? []);
+        final idx = roteiro.indexWhere((e) => e.toString().contains('estanqueidade'));
+        if (idx > 0) return 'aguardando_${roteiro[idx - 1]}';
+        // Fallback por tipoAgente (segurança caso roteiro esteja vazio)
+        final agente = (item['tipoAgente'] ?? '').toString().toLowerCase();
+        if (agente.contains('co2')) return 'aguardando_recarga_co2';
+        if (agente.contains('abc')) return 'aguardando_recarga_abc';
+        if (agente.contains('bc')) return 'aguardando_recarga_bc';
+        if (agente.contains('ap') || agente.contains('esp') || agente.contains('agua')) return 'aguardando_recarga_agua_espuma';
+        return 'aguardando_recarga_abc';
+      },
       etapaAnteriorOS: 'recarga',
       statusLoteAnteriorOS: 'em_recarga',
       mensagemReverter:

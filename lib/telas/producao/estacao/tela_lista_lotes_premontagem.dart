@@ -23,7 +23,7 @@ class TelaListaLotesPremontagem extends StatelessWidget {
       titulo: 'Fila: Pré-Montagem',
       corSetor: Colors.indigo.shade700,
       iconeAvatar: Icons.pending_actions,
-      statusAguardando: 'aguardando_premontagem', // referência, substituído pelo filtroOS
+      statusAguardando: 'aguardando_pre_montagem', // referência, substituído pelo filtroOS
       filtroOS: (itens) => itens.any(_estaEmPremontagem),
       mensagemVazia: 'Nenhum lote pendente para montagem.',
       textoSubtitulo: (passaram, total) => passaram == total
@@ -37,7 +37,7 @@ class TelaListaLotesPremontagem extends StatelessWidget {
       mostrarBotaoRequisicao: true,
       nomeSetorCC: '', // sem CC direto — usuário preenche manualmente se precisar
       mostrarBotaoReverter: true,
-      statusParaReverter: 'aguardando_premontagem',
+      statusParaReverter: 'aguardando_pre_montagem',
       statusAnteriorReverter: 'aguardando_estanqueidade',
       etapaAnteriorOS: 'estanqueidade',
       statusLoteAnteriorOS: 'em_estanqueidade',

@@ -19,6 +19,24 @@ class _TelaEstacaoMontagemState extends State<TelaEstacaoMontagem> {
   final TextEditingController _scannerController = TextEditingController();
   final Color corSetor = Colors.deepPurple.shade700;
 
+  Stream<List<Map<String, dynamic>>>? _streamItens;
+  String? _empresaIdEscutando;
+  List<Map<String, dynamic>> _itensSnapshot = [];
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final empresaId = context.watch<UsuarioProvider>().usuario?.empresaId;
+    if (empresaId != null &&
+        empresaId.isNotEmpty &&
+        empresaId != _empresaIdEscutando) {
+      _empresaIdEscutando = empresaId;
+      _streamItens = context
+          .read<ItemOsProvider>()
+          .streamItensPorOsEStatus(widget.osId, 'aguardando_montagem', empresaId);
+    }
+  }
+
   String _limparCodigo(String valor) {
     String limpo = valor.trim().toUpperCase();
     if (limpo.contains('HTTP')) limpo = limpo.split('/').last;
@@ -42,11 +60,24 @@ class _TelaEstacaoMontagemState extends State<TelaEstacaoMontagem> {
     if (codigo.isEmpty) return;
     String idCracha = _limparCodigo(codigo);
     final empresaId = context.read<UsuarioProvider>().usuario?.empresaId ?? '';
-    final item = await context.read<ItemOsProvider>().buscarItemPorCracha(
-      widget.osId,
-      idCracha,
-      'aguardando_montagem', empresaId,
-    );
+    // Busca local — scan instantâneo (sem round-trip Firestore)
+    Map<String, dynamic>? item;
+    if (_itensSnapshot.isNotEmpty) {
+      try {
+        item = _itensSnapshot.firstWhere(
+              (i) => i['idCrachaTemporario']?.toString() == idCracha,
+        );
+      } catch (_) {
+        item = null;
+      }
+    }
+    // Fallback ao Firestore apenas se o snapshot ainda não chegou
+    if (item == null && _itensSnapshot.isEmpty) {
+      item = await context.read<ItemOsProvider>().buscarItemPorCracha(
+        widget.osId, idCracha, 'aguardando_montagem', empresaId,
+      );
+    }
+
 
     if (item != null) {
       _irParaExecucao(item);
@@ -63,7 +94,6 @@ class _TelaEstacaoMontagemState extends State<TelaEstacaoMontagem> {
 
   @override
   Widget build(BuildContext context) {
-    final empresaId = context.read<UsuarioProvider>().usuario?.empresaId ?? '';
     return Scaffold(
       appBar: AppBar(
         title: Text('Montagem Final: OS ${widget.osId}'),
@@ -112,13 +142,12 @@ class _TelaEstacaoMontagemState extends State<TelaEstacaoMontagem> {
           ),
           Expanded(
             child: StreamBuilder<List<Map<String, dynamic>>>(
-              stream: context
-                  .read<ItemOsProvider>()
-                  .streamItensPorOsEStatus(widget.osId, 'aguardando_montagem', empresaId),
+              stream: _streamItens,
               builder: (context, snapshot) {
                 if (!snapshot.hasData) {
                   return const Center(child: CircularProgressIndicator());
                 }
+                _itensSnapshot = snapshot.data!;
                 final itens = snapshot.data!;
                 if (itens.isEmpty) return _buildConcluido();
 

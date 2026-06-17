@@ -19,7 +19,30 @@ class _TelaEstacaoPremontagemState extends State<TelaEstacaoPremontagem> {
   bool _processando = false;
   String _statusEnvio = '';
 
-  // Libera todos os itens e dispara a impressão
+  // Stream estável — criada em didChangeDependencies quando empresaId estiver pronto.
+  // CORREÇÃO SESSÃO 22: initState usava streamItensPorOs (sem empresaId no .where())
+  // → Firestore rejeitava com permission-denied → StreamBuilder ficava girando para sempre.
+  // Agora usa streamItensPorOsEStatus com empresaId, padrão correto de todas as estações.
+  Stream<List<Map<String, dynamic>>>? _streamItens;
+  String? _empresaIdEscutando;
+
+  // Snapshot local — permite que o FAB use os dados sem nova query ao Firestore
+  List<Map<String, dynamic>> _itensSnapshot = [];
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final empresaId = context.watch<UsuarioProvider>().usuario?.empresaId;
+    if (empresaId != null &&
+        empresaId.isNotEmpty &&
+        empresaId != _empresaIdEscutando) {
+      _empresaIdEscutando = empresaId;
+      _streamItens = context
+          .read<ItemOsProvider>()
+          .streamItensPorOsEStatus(widget.osId, 'aguardando_pre_montagem', empresaId);
+    }
+  }
+
   Future<void> _liberarLoteCompleto(
       List<Map<String, dynamic>> itens,
       bool imprimirGarantia,
@@ -34,11 +57,9 @@ class _TelaEstacaoPremontagemState extends State<TelaEstacaoPremontagem> {
       _statusEnvio = 'Liberando lote...';
     });
 
-    // Captura o provider antes de qualquer await — regra do BuildContext async
     final provider = context.read<ItemOsProvider>();
 
     try {
-      // Avança todos os itens via repository
       await provider.liberarLotePremontagem(
         osId: widget.osId,
         itens: itens,
@@ -47,7 +68,6 @@ class _TelaEstacaoPremontagemState extends State<TelaEstacaoPremontagem> {
 
       setState(() => _statusEnvio = 'Enviando ordem de impressão...');
 
-      // Cria o job de impressão para o servidor Windows
       await provider.criarPrintJob(
         itensIds: itens.map((item) => item['id'] as String).toList(),
         osId: widget.osId,
@@ -137,15 +157,6 @@ class _TelaEstacaoPremontagemState extends State<TelaEstacaoPremontagem> {
     );
   }
 
-  // Filtra os itens que estão na pré-montagem
-  List<Map<String, dynamic>> _filtrarPreMontagem(
-      List<Map<String, dynamic>> todos) {
-    return todos.where((item) {
-      String st = item['status']?.toString().toLowerCase().replaceAll('_', '') ?? '';
-      return st.contains('premontagem');
-    }).toList();
-  }
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -198,15 +209,20 @@ class _TelaEstacaoPremontagemState extends State<TelaEstacaoPremontagem> {
         ),
       )
           : StreamBuilder<List<Map<String, dynamic>>>(
-        stream: context
-            .read<ItemOsProvider>()
-            .streamItensPorOs(widget.osId),
+        stream: _streamItens,
         builder: (ctx, snap) {
+          if (snap.hasError) {
+            return Center(
+              child: Text('Erro: ${snap.error}',
+                  style: const TextStyle(color: Colors.red)),
+            );
+          }
           if (!snap.hasData) {
             return const Center(child: CircularProgressIndicator());
           }
 
-          final itens = _filtrarPreMontagem(snap.data!);
+          _itensSnapshot = snap.data!;
+          final itens = _itensSnapshot;
 
           if (itens.isEmpty) {
             return const Center(
@@ -235,24 +251,14 @@ class _TelaEstacaoPremontagemState extends State<TelaEstacaoPremontagem> {
         icon: const Icon(Icons.print, color: Colors.white),
         label: const Text('LIBERAR LOTE E IMPRIMIR',
             style: TextStyle(color: Colors.white)),
-        onPressed: () async {
-          // Captura o provider antes do await — regra do BuildContext async
-          final provider = context.read<ItemOsProvider>();
-          // Busca snapshot único para o botão de liberação
-          final todos = await provider
-              .streamItensPorOs(widget.osId)
-              .first;
-
-          final itensFiltrados = _filtrarPreMontagem(todos);
-
-          if (itensFiltrados.isNotEmpty) {
-            if (mounted) _exibirConfirmacaoImpressao(itensFiltrados);
+        onPressed: () {
+          // Usa o snapshot local — sem nova query ao Firestore
+          if (_itensSnapshot.isNotEmpty) {
+            _exibirConfirmacaoImpressao(_itensSnapshot);
           } else {
-            if (mounted) {
-              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-                  content: Text(
-                      'Nenhum item pendente para liberação neste lote.')));
-            }
+            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                content: Text(
+                    'Nenhum item pendente para liberação neste lote.')));
           }
         },
       ),

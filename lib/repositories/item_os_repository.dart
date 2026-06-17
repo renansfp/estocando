@@ -2,10 +2,10 @@
 
 abstract class ItemOsRepository {
   /// Lê o documento `contadores/{empresaId}` mantido pela Cloud Function.
-  /// Custo fixo de 1 documento por evento — use para o dashboard e telas de seleção.
   Stream<Map<String, int>> streamDocumentoContadores(String empresaId);
 
   /// [empresaId] é obrigatório — isola dados da empresa. Nunca chamar sem ele.
+  /// Usa collectionGroup('itens') para varrer todas as OSs.
   Stream<List<Map<String, dynamic>>> streamItensEmProducao(String empresaId);
   Stream<List<Map<String, dynamic>>> streamItensPorOsEStatus(
       String osId, String status, String empresaId);
@@ -19,18 +19,22 @@ abstract class ItemOsRepository {
     required String osId,
     required String statusPendente,
     required String proximaEstacao,
+    required String empresaId,
     Map<String, dynamic>? dadosOsExtra,
   });
   Future<void> reverterLote({
     required String osId,
+    required String empresaId,
     required String statusAtual,
     required String statusAnterior,
     required Map<String, dynamic> dadosOS,
+    String Function(Map<String, dynamic>)? statusAnteriorFn,
   });
   Future<void> liberarLotePremontagem({
     required String osId,
     required List<Map<String, dynamic>> itens,
     required String operador,
+    required String empresaId,
   });
   Future<void> criarPrintJob({
     required List<String> itensIds,
@@ -47,6 +51,8 @@ abstract class ItemOsRepository {
     required String pesoVazio,
     required String pesoCheioMeta,
     required String proximaEstacao,
+    required String statusAtualItem,
+    required String empresaId,
   });
   Stream<List<Map<String, dynamic>>> streamItensPorOs(String osId);
   Future<void> expedirItem({
@@ -54,11 +60,15 @@ abstract class ItemOsRepository {
     required String osId,
     required String idCracha,
     required String? equipId,
+    required String empresaId,
   });
   Future<void> reprovarItem({
     required String itemId,
+    required String osId,
+    required String statusAtual,
     required String statusDestino,
     required Map<String, dynamic> dadosFalha,
+    required String empresaId,
   });
   Future<Map<String, dynamic>?> buscarItemPorCrachaEOsId(
       String osId, String cracha, String empresaId);
@@ -79,13 +89,14 @@ abstract class ItemOsRepository {
     required String? clienteNome,
     required String cc,
     required String operador,
+    required String empresaId,
+    required String statusAtualItem,
   });
 
   Future<void> registrarPecasTrocadas({
     required String itemId,
     required String osId,
     required String empresaId,
-    // Map: legendaNumero → codigoProduto
     required Map<int, String> pecas,
   });
 
@@ -94,6 +105,7 @@ abstract class ItemOsRepository {
     required Map<String, dynamic> item,
     required String etapa,
     required String motivo,
+    required String empresaId,
   });
   Future<void> confirmarTriagem({
     required String itemId,
@@ -104,60 +116,46 @@ abstract class ItemOsRepository {
     required bool precisaPintura,
     required bool testeVencido,
     required String operador,
+    required String empresaId,
   });
+
+  /// [osId] obrigatório — localiza o item na subcoleção correta.
   Future<void> finalizarEnsaioTH({
     required String itemId,
+    required String osId,
     required String? equipamentoId,
     required bool aprovado,
     required String proximaEtapa,
     required Map<String, dynamic> dadosTH,
     Map<String, dynamic>? updatesEquipamento,
+    required String empresaId,
   });
+
   Stream<List<Map<String, dynamic>>> streamItensDescarga(String empresaId);
   Future<void> liberarLoteParaLimpeza({
     required String osId,
     required List<String> itemIds,
+    required String empresaId,
   });
-  Future<void> reverterParaDescarga(String osId);
+  Future<void> reverterParaDescarga(String osId, String empresaId);
 
-  // ─── Novos métodos ────────────────────────────────────────────────────────
+  /// [osId] obrigatório — localiza o item na subcoleção correta.
+  Future<void> confirmarDescargaItem(
+      String itemOsId, String osId, String operador);
 
-  /// Marca um item como descarga concluída (status = 'descarga_concluida').
-  /// [operador] é o nome do usuário logado — gravado para rastreabilidade.
-  Future<void> confirmarDescargaItem(String itemOsId, String operador);
-
-  /// Busca um item pelo crachá na OS, atualiza para 'aguardando_limpeza'
-  /// e avança a OS se for o último item pendente na descarga.
-  /// [operador] é o nome do usuário logado — gravado para rastreabilidade.
-  /// Lança [Exception] se o crachá não for encontrado.
   Future<void> confirmarDescargaPorCracha(
-      String osId, String idCracha, String operador);
+      String osId, String idCracha, String operador, String empresaId);
 
-  /// Stream de itens aguardando descarga de uma OS, filtrado por agente.
-  /// Usado pela TelaBalancoLote para mostrar itens do setor correspondente.
   Stream<List<Map<String, dynamic>>> streamItensDescargaOsPorAgente(
       String osId, List<String> filtrosAgente);
 
-
-  /// Retorna todos os itens de uma OS com todos os dados aninhados
-  /// (dadosTH, manutencao_valvula, recarga, roteiro, pecasTrocadas etc.).
-  /// Usado pelo RelatorioOsService para montar o laudo.
   Future<List<Map<String, dynamic>>> buscarItensComDadosCompletos(String osId);
 
-
-  /// Verifica se um crachá está em uso em qualquer OS no momento.
-  /// Retorna true se o crachá está ocupado (statusAtual == 'entregue').
   Future<bool> verificarCrachaEmUso(String idCracha, String empresaId);
 
-  /// Busca os dados do crachá físico pelo ID legível (ex: "R-042") e empresa.
-  /// Retorna o documento completo da coleção `crachas`, incluindo
-  /// `status`, `itemOsIdAtual` e `osIdAtual`.
-  /// Retorna null se o crachá não existir no banco.
   Future<Map<String, dynamic>?> buscarInfoCracha(
       String idCracha, String empresaId);
 
-  /// Busca um item_os diretamente pelo ID do documento.
-  /// Usado pelo Scanner de Crachá para carregar os dados do extintor
-  /// sem precisar conhecer o osId ou o status.
-  Future<Map<String, dynamic>?> buscarItemPorId(String itemId);
+  /// [osId] obrigatório — localiza o item na subcoleção correta.
+  Future<Map<String, dynamic>?> buscarItemPorId(String itemId, String osId);
 }

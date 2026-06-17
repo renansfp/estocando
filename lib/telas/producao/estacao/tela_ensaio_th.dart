@@ -187,8 +187,6 @@ class _TelaEnsaioTHState extends State<TelaEnsaioTH> {
           ? roteiro[index + 1]
           : 'pintura';
 
-      // Monta dadosTH localmente e passa para o provider.
-      // O timestamp ('data') é injetado pelo repositório — não pela tela.
       Map<String, dynamic> dadosTH = {
         'resultado': aprovado ? 'APROVADO' : 'REPROVADO',
       };
@@ -237,7 +235,6 @@ class _TelaEnsaioTHState extends State<TelaEnsaioTH> {
             'motivoCondenacao': 'Reprovado no Teste Hidrostático',
           if (aprovado) ...{
             'anoUltimoTH': DateFormat('MM/yyyy').format(DateTime.now()),
-            // motivoCondenacao é apagado via FieldValue.delete() no repositório
             'taraGravada': pv,
             'pesoVazio': pv,
             'volumeHidraulico': pc - pv,
@@ -268,13 +265,14 @@ class _TelaEnsaioTHState extends State<TelaEnsaioTH> {
             'motivoCondenacao': 'Reprovado no Teste Hidrostático',
           if (aprovado) ...{
             'anoUltimoTH': DateFormat('MM/yyyy').format(DateTime.now()),
-            // motivoCondenacao é apagado via FieldValue.delete() no repositório
           },
         };
       }
 
+      // MIGRAÇÃO: osId agora é obrigatório para localizar na subcoleção
       await context.read<ItemOsProvider>().finalizarEnsaioTH(
         itemId: widget.itemOsId,
+        osId: widget.osId,
         equipamentoId: widget.dadosItem['equipamentoId'] as String?,
         aprovado: aprovado,
         proximaEtapa: proximaEtapa,

@@ -155,6 +155,11 @@ class TelaListaLotesBase extends StatelessWidget {
   /// Status de destino (para onde voltar). Ex: 'aguardando_limpeza'
   final String statusAnteriorReverter;
 
+  /// Quando informado, substitui [statusAnteriorReverter] com lógica por item.
+  /// Útil quando itens do mesmo lote precisam ir para destinos diferentes
+  /// (ex: estanqueidade → recarga, onde o status depende do agente).
+  final String Function(Map<String, dynamic>)? statusAnteriorReverterFn;
+
   /// Valor de etapaAtual a gravar no documento da OS. Ex: 'limpeza'
   final String etapaAnteriorOS;
 
@@ -197,6 +202,7 @@ class TelaListaLotesBase extends StatelessWidget {
     this.mostrarBotaoReverter = false,
     this.statusParaReverter = '',
     this.statusAnteriorReverter = '',
+    this.statusAnteriorReverterFn,
     this.etapaAnteriorOS = '',
     this.statusLoteAnteriorOS = '',
     this.mensagemReverter = 'Deseja devolver este lote para a etapa anterior?',
@@ -210,6 +216,7 @@ class TelaListaLotesBase extends StatelessWidget {
       ) async {
     // Captura o repositório antes do await — boa prática com BuildContext async
     final repo = context.read<ItemOsRepository>();
+    final empresaId = context.read<UsuarioProvider>().usuario?.empresaId ?? '';
 
     final confirmou = await showDialog<bool>(
       context: context,
@@ -241,12 +248,14 @@ class TelaListaLotesBase extends StatelessWidget {
     try {
       await repo.reverterLote(
         osId: osId,
+        empresaId: empresaId,
         statusAtual: statusParaReverter,
         statusAnterior: statusAnteriorReverter,
         dadosOS: {
           'etapaAtual': etapaAnteriorOS,
           'statusLote': statusLoteAnteriorOS,
         },
+        statusAnteriorFn: statusAnteriorReverterFn,
       );
 
       if (context.mounted) {

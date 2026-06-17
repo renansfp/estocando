@@ -44,7 +44,8 @@ class _TelaControleDescargaState extends State<TelaControleDescarga> {
     if (osId.isEmpty) return;
     setState(() => _processando = true);
     try {
-      await context.read<ItemOsProvider>().reverterParaDescarga(osId);
+      final empresaId = context.read<UsuarioProvider>().usuario?.empresaId ?? '';
+      await context.read<ItemOsProvider>().reverterParaDescarga(osId, empresaId);
 
       if (mounted) {
         Navigator.pop(context);

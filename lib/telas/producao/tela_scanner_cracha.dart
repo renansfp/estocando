@@ -2,13 +2,9 @@
 //
 // Scanner de Crachá — busca um extintor pelo QR code do crachá físico.
 //
-// Acessível a qualquer perfil. O operador bipa (ou digita) o ID do crachá
-// e vê imediatamente: qual OS, qual cliente, qual estação e os dados
-// básicos do extintor — sem precisar saber o número da OS.
-//
 // Fluxo de leitura (2 buscas):
-//   1. `crachas` → `idCracha` + `empresaId` → obtém `itemOsIdAtual`
-//   2. `itens_os` → `itemOsIdAtual` → dados completos do extintor
+//   1. `crachas` → `idCracha` + `empresaId` → obtém `itemOsIdAtual` e `osIdAtual`
+//   2. `ordens_servico/{osId}/itens/{itemId}` → dados completos do extintor
 
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
@@ -30,7 +26,6 @@ class _TelaScannerCrachaState extends State<TelaScannerCracha> {
   bool _buscando = false;
   String? _erro;
 
-  // Dados do crachá encontrado
   Map<String, dynamic>? _cracha;
   Map<String, dynamic>? _item;
 
@@ -71,15 +66,20 @@ class _TelaScannerCrachaState extends State<TelaScannerCracha> {
         return;
       }
 
-      // 2. Se estiver em uso, busca o item_os correspondente
+      // 2. Se estiver em uso, busca o item na subcoleção da OS correspondente.
+      // O crachá guarda tanto o itemOsIdAtual quanto o osIdAtual para que
+      // possamos montar o caminho correto: ordens_servico/{osId}/itens/{itemId}
       Map<String, dynamic>? item;
       final statusCracha = cracha['status']?.toString() ?? '';
       final itemOsId = cracha['itemOsIdAtual']?.toString() ?? '';
+      final osIdCracha = cracha['osIdAtual']?.toString() ?? '';
 
-      if (statusCracha == 'emUso' && itemOsId.isNotEmpty) {
+      if (statusCracha == 'emUso' &&
+          itemOsId.isNotEmpty &&
+          osIdCracha.isNotEmpty) {
         item = await context
             .read<ItemOsProvider>()
-            .buscarItemPorId(itemOsId);
+            .buscarItemPorId(itemOsId, osIdCracha);
       }
 
       if (!mounted) return;
@@ -111,7 +111,6 @@ class _TelaScannerCrachaState extends State<TelaScannerCracha> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            // ── Campo de busca ─────────────────────────────────────────
             CampoComScanner(
               controller: _controller,
               focusNode: _focusNode,
@@ -134,7 +133,6 @@ class _TelaScannerCrachaState extends State<TelaScannerCracha> {
             ),
             const SizedBox(height: 24),
 
-            // ── Estado de carregamento ─────────────────────────────────
             if (_buscando)
               const Center(
                 child: Padding(
@@ -143,11 +141,9 @@ class _TelaScannerCrachaState extends State<TelaScannerCracha> {
                 ),
               ),
 
-            // ── Erro ───────────────────────────────────────────────────
             if (_erro != null)
               _buildCardErro(_erro!),
 
-            // ── Resultado ─────────────────────────────────────────────
             if (_cracha != null && !_buscando)
               _buildResultado(_cracha!, _item),
           ],
@@ -155,8 +151,6 @@ class _TelaScannerCrachaState extends State<TelaScannerCracha> {
       ),
     );
   }
-
-  // ── Widgets de resultado ────────────────────────────────────────────────
 
   Widget _buildCardErro(String mensagem) {
     return Card(
@@ -241,8 +235,7 @@ class _TelaScannerCrachaState extends State<TelaScannerCracha> {
     );
   }
 
-  Widget _buildCardItem(
-      String idCracha, Map<String, dynamic> item) {
+  Widget _buildCardItem(String idCracha, Map<String, dynamic> item) {
     final status = item['status']?.toString() ?? '';
     final numeroOS = item['numeroOS']?.toString() ?? '—';
     final clienteNome = item['clienteNome']?.toString() ?? '—';
@@ -256,7 +249,6 @@ class _TelaScannerCrachaState extends State<TelaScannerCracha> {
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       child: Column(
         children: [
-          // Cabeçalho com o ID do crachá
           Container(
             decoration: BoxDecoration(
               color: Colors.blueGrey.shade800,
@@ -282,7 +274,6 @@ class _TelaScannerCrachaState extends State<TelaScannerCracha> {
             ),
           ),
 
-          // Chip de estação atual
           Container(
             width: double.infinity,
             color: corEstacao.withAlpha(30),
@@ -304,7 +295,6 @@ class _TelaScannerCrachaState extends State<TelaScannerCracha> {
             ),
           ),
 
-          // Dados do extintor
           Padding(
             padding: const EdgeInsets.fromLTRB(20, 12, 20, 20),
             child: Column(
@@ -351,8 +341,6 @@ class _TelaScannerCrachaState extends State<TelaScannerCracha> {
     );
   }
 
-  // ── Helpers de tradução ─────────────────────────────────────────────────
-
   static const _labelsEstacao = {
     'aguardando_descarga': 'Descarga',
     'descarga_concluida': 'Descarga (concluída)',
@@ -379,7 +367,6 @@ class _TelaScannerCrachaState extends State<TelaScannerCracha> {
     if (_labelsEstacao.containsKey(status)) {
       return _labelsEstacao[status]!;
     }
-    // Fallback: remove prefixo e formata
     return status
         .replaceFirst('aguardando_', '')
         .replaceAll('_', ' ')

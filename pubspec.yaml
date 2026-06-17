@@ -14,16 +14,16 @@ dependencies:
   shared_preferences: ^2.2.3
   intl: ^0.19.0
   mask_text_input_formatter: ^2.9.0
-  firebase_core: ^4.3.0
-  cloud_firestore: ^6.1.1
+  firebase_core: ^4.6.0
+  cloud_firestore: ^6.2.0
   file_picker: ^6.2.1
   csv: ^6.0.0
   flutter_speed_dial: ^7.0.0
   google_fonts: ^6.2.1
-  firebase_auth: ^6.1.3
+  firebase_auth: ^6.3.0
   validators: ^3.0.0
   flutter_masked_text2: ^0.9.1
-  cloud_functions: ^6.0.5
+  cloud_functions: ^6.1.0
   excel: ^4.0.2
   path_provider: ^2.1.3
   share_plus: ^12.0.1
@@ -33,7 +33,7 @@ dependencies:
   printing: ^5.12.0
   mobile_scanner: ^7.1.4
   image_picker: ^1.2.1
-  firebase_storage: ^13.0.5
+  firebase_storage: ^13.2.0
   qr_flutter: ^4.1.0
   screenshot: ^3.0.0
 
@@ -41,7 +41,7 @@ dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^5.0.0
-  flutter_launcher_icons: ^0.13.1 # <--- AGORA SIM! Alinhado com flutter_lints
+  flutter_launcher_icons: ^0.13.1
 
 flutter:
   uses-material-design: true
@@ -49,7 +49,6 @@ flutter:
     - assets/images/logo_protecin_cores.png
     - assets/images/logo_protecin_mono.png
 
-# Configuração dos ícones (Isso aqui fica fora do bloco flutter, bem no final)
 flutter_launcher_icons:
   android: true
   ios: true

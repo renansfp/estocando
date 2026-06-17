@@ -13,6 +13,7 @@ import 'package:protecin_producao/widgets/seletor_operador.dart';
 class TelaBalancoItem extends StatefulWidget {
   final String idRastreio;
   final String itemOsId;
+  final String osId;          // MIGRAÇÃO: necessário para localizar na subcoleção
   final String equipamentoId;
   final String tipoAgente;
 
@@ -20,6 +21,7 @@ class TelaBalancoItem extends StatefulWidget {
     super.key,
     required this.idRastreio,
     required this.itemOsId,
+    required this.osId,
     required this.equipamentoId,
     required this.tipoAgente,
   });
@@ -37,7 +39,7 @@ class _TelaBalancoItemState extends State<TelaBalancoItem> {
       final operador = context.read<UsuarioProvider>().operadorAtivo?.nome ?? 'Operador';
       await context
           .read<ItemOsProvider>()
-          .confirmarDescargaItem(widget.itemOsId, operador);
+          .confirmarDescargaItem(widget.itemOsId, widget.osId, operador); // MIGRAÇÃO: +osId
 
       if (mounted) Navigator.pop(context);
     } catch (e) {

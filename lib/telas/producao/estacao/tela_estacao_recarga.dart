@@ -8,10 +8,6 @@ import 'package:protecin_producao/provider/usuario_provider.dart';
 class TelaEstacaoRecarga extends StatefulWidget {
   final String osId;
   final List<String> filtrosAgente;
-
-  /// Status exato salvo no banco para este tipo de recarga.
-  /// Ex: 'aguardando_recarga_co2', 'aguardando_recarga_abc', etc.
-  /// Precisa bater com o valor gerado pelo roteiro em tela_triagem_limpeza.
   final String statusRecarga;
 
   const TelaEstacaoRecarga({
@@ -28,6 +24,25 @@ class TelaEstacaoRecarga extends StatefulWidget {
 class _TelaEstacaoRecargaState extends State<TelaEstacaoRecarga> {
   final TextEditingController _scannerController = TextEditingController();
 
+  // Stream estável — criada UMA vez em didChangeDependencies.
+  Stream<List<Map<String, dynamic>>>? _streamItens;
+  String? _empresaIdEscutando;
+  List<Map<String, dynamic>> _itensSnapshot = [];
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final empresaId = context.watch<UsuarioProvider>().usuario?.empresaId;
+    if (empresaId != null &&
+        empresaId.isNotEmpty &&
+        empresaId != _empresaIdEscutando) {
+      _empresaIdEscutando = empresaId;
+      _streamItens = context
+          .read<ItemOsProvider>()
+          .streamItensPorOsEStatus(widget.osId, widget.statusRecarga, empresaId);
+    }
+  }
+
   String _limparCodigo(String valor) {
     String limpo = valor.trim().toUpperCase();
     if (limpo.contains('HTTP')) limpo = limpo.split('/').last;
@@ -38,16 +53,25 @@ class _TelaEstacaoRecargaState extends State<TelaEstacaoRecarga> {
     if (codigo.isEmpty) return;
     String idCracha = _limparCodigo(codigo);
 
-    final empresaId = context.read<UsuarioProvider>().usuario?.empresaId ?? '';
+    // Busca local — scan instantâneo (sem round-trip Firestore)
+    Map<String, dynamic>? item;
+    if (_itensSnapshot.isNotEmpty) {
+      try {
+        item = _itensSnapshot.firstWhere(
+              (i) => i['idCrachaTemporario']?.toString() == idCracha,
+        );
+      } catch (_) {
+        item = null;
+      }
+    }
+    // Fallback ao Firestore apenas se o snapshot ainda não chegou
+    if (item == null && _itensSnapshot.isEmpty) {
+      final empresaId = context.read<UsuarioProvider>().usuario?.empresaId ?? '';
+      item = await context.read<ItemOsProvider>().buscarItemPorCracha(
+        widget.osId, idCracha, widget.statusRecarga, empresaId,
+      );
+    }
 
-    final item = await context
-        .read<ItemOsProvider>()
-        .buscarItemPorCracha(
-      widget.osId,
-      idCracha,
-      widget.statusRecarga,   // ← filtro pelo status correto da bancada
-      empresaId,
-    );
 
     if (item != null) {
       String ag = item['tipoAgente']?.toString().toUpperCase() ?? '';
@@ -92,7 +116,6 @@ class _TelaEstacaoRecargaState extends State<TelaEstacaoRecarga> {
 
   @override
   Widget build(BuildContext context) {
-    final empresaId = context.read<UsuarioProvider>().usuario?.empresaId ?? '';
     return Scaffold(
       appBar: AppBar(
         title: Text('Recarga: OS ${widget.osId}'),
@@ -110,15 +133,13 @@ class _TelaEstacaoRecargaState extends State<TelaEstacaoRecarga> {
           ),
           Expanded(
             child: StreamBuilder<List<Map<String, dynamic>>>(
-              stream: context
-                  .read<ItemOsProvider>()
-                  .streamItensPorOsEStatus(widget.osId, widget.statusRecarga,empresaId),
+              stream: _streamItens,
               builder: (context, snapshot) {
                 if (!snapshot.hasData) {
                   return const Center(child: CircularProgressIndicator());
                 }
 
-                // Filtra por agente na tela, igual ao original
+                _itensSnapshot = snapshot.data!;
                 final itens = snapshot.data!.where((item) {
                   String ag = item['tipoAgente']?.toString().toUpperCase() ?? '';
                   return widget.filtrosAgente.any((f) {

@@ -1,6 +1,4 @@
 // lib/telas/producao/estacao/tela_execucao_recarga.dart
-// Otimizado na sessão 20: equipamento, produto e stream de lotes
-// são carregados UMA vez no initState em vez de a cada rebuild.
 
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
@@ -15,8 +13,6 @@ import 'package:protecin_producao/widgets/dialog_pecas_trocadas.dart';
 import 'package:protecin_producao/widgets/seletor_operador.dart';
 
 // ── Dossiê com tudo que a tela precisa carregar uma vez ─────────────────────
-// Em vez de 3 FutureBuilder/StreamBuilder no build() (cada um disparado a cada
-// rebuild da tela), carregamos tudo de uma vez no initState e mantemos aqui.
 class _DadosCarregados {
   final Equipamento equipamento;
   final String agente;
@@ -57,18 +53,38 @@ class _TelaExecucaoRecargaState extends State<TelaExecucaoRecarga> {
   String? _produtoId;
   final TextEditingController _pesoCo2Controller = TextEditingController();
 
-  // Future estável — criada UMA vez no initState.
-  late final Future<_DadosCarregados?> _futureDados;
+  // Future estável — criado UMA vez em didChangeDependencies.
+  // Nullable para evitar uso antes da primeira chamada de didChangeDependencies.
+  Future<_DadosCarregados?>? _futureDados;
+  bool _dadosIniciados = false;
+  bool _erroCarregamento = false;
 
+  // CORREÇÃO DA SESSÃO 20:
+  // Antes: _futureDados era inicializado no initState com context.read<>().
+  // No Flutter Web, initState roda antes da árvore de providers estar estável,
+  // então context.read<>() podia falhar silenciosamente.
+  // Agora: didChangeDependencies garante que os providers estão prontos.
+  //
+  // CORREÇÃO DA SESSÃO 22:
+  // _dadosIniciados evita recargas desnecessárias, mas se _carregarDados()
+  // retorna null (ex: timeout de rede), a tela ficava presa sem retry.
+  // Adicionado botão de tentar novamente via _tentarNovamente().
   @override
-  void initState() {
-    super.initState();
-    _futureDados = _carregarDados();
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (!_dadosIniciados) {
+      _dadosIniciados = true;
+      _futureDados = _carregarDados();
+    }
   }
 
-  // Carrega equipamento → produto → prepara stream de lotes em uma única
-  // cascata async. Tudo cacheado no _DadosCarregados e reaproveitado em
-  // qualquer rebuild da tela (sem novas queries Firestore).
+  void _tentarNovamente() {
+    setState(() {
+      _erroCarregamento = false;
+      _futureDados = _carregarDados();
+    });
+  }
+
   Future<_DadosCarregados?> _carregarDados() async {
     final equipId = widget.item['equipamentoId'] as String? ?? '';
     if (equipId.isEmpty) return null;
@@ -86,8 +102,6 @@ class _TelaExecucaoRecargaState extends State<TelaExecucaoRecarga> {
     Map<String, dynamic>? produto;
     Stream<List<Map<String, dynamic>>>? streamLotes;
 
-    // Só carrega produto e lotes se for Pó com substituição.
-    // Para CO₂ ou reaproveitamento, essas queries não são necessárias.
     if (isPo && substituir && codigoMestre.isNotEmpty) {
       final empresaId =
           context.read<UsuarioProvider>().usuario?.empresaId ?? '';
@@ -131,9 +145,6 @@ class _TelaExecucaoRecargaState extends State<TelaExecucaoRecarga> {
     return '';
   }
 
-  /// Retorna true para extintores de Água e Espuma —
-  /// são os únicos que registram as peças de válvula aqui
-  /// (Pó registra em tela_estacao_valvula_po, CO₂ em tela_estacao_manutencao_valvula)
   bool _isAguaOuEspuma(String agente) {
     final a = agente.toUpperCase();
     return a.contains('AGUA') ||
@@ -164,13 +175,34 @@ class _TelaExecucaoRecargaState extends State<TelaExecucaoRecarga> {
             return const Center(child: CircularProgressIndicator());
           }
 
-          if (snapshot.data == null) {
-            return const Center(
+          if (snapshot.hasError || snapshot.data == null) {
+            return Center(
               child: Padding(
-                padding: EdgeInsets.all(20),
-                child: Text(
-                  'Equipamento não encontrado.\nVoltar e tentar novamente.',
-                  textAlign: TextAlign.center,
+                padding: const EdgeInsets.all(20),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.wifi_off, size: 48, color: Colors.grey),
+                    const SizedBox(height: 16),
+                    const Text(
+                      'Não foi possível carregar os dados do equipamento.',
+                      textAlign: TextAlign.center,
+                    ),
+                    if (snapshot.hasError) ...[
+                      const SizedBox(height: 8),
+                      Text(
+                        snapshot.error.toString(),
+                        style: const TextStyle(fontSize: 11, color: Colors.grey),
+                        textAlign: TextAlign.center,
+                      ),
+                    ],
+                    const SizedBox(height: 24),
+                    ElevatedButton.icon(
+                      icon: const Icon(Icons.refresh),
+                      label: const Text('TENTAR NOVAMENTE'),
+                      onPressed: _tentarNovamente,
+                    ),
+                  ],
                 ),
               ),
             );
@@ -286,7 +318,6 @@ class _TelaExecucaoRecargaState extends State<TelaExecucaoRecarga> {
     );
   }
 
-  // Agora recebe produto e stream já carregados — sem queries no build.
   Widget _buildSeletorLotes(
       Map<String, dynamic>? produto,
       Stream<List<Map<String, dynamic>>>? streamLotes,
@@ -408,7 +439,6 @@ class _TelaExecucaoRecargaState extends State<TelaExecucaoRecarga> {
         fabricanteEquipamento: equip.fabricante,
       );
 
-      // Operador cancelou
       if (resultado == null) return;
       pecasSelecionadas = resultado;
     }
@@ -431,7 +461,6 @@ class _TelaExecucaoRecargaState extends State<TelaExecucaoRecarga> {
       final String tipoRegistro =
       isPo && substituirPo ? 'CARGA NOVA' : 'REAPROVEITAMENTO';
 
-      // ── Processa a recarga ─────────────────────────────────────────────
       await itemOsProvider.processarRecarga(
         itemId: widget.item['id'],
         osId: widget.osId,
@@ -449,15 +478,15 @@ class _TelaExecucaoRecargaState extends State<TelaExecucaoRecarga> {
         clienteNome: equip.clienteNome,
         cc: MapeadorCustos.obterCC('RECARGA E TESTES EQUIPAMENTOS PQS'),
         operador: operador,
+        statusAtualItem: widget.item['status'] as String? ?? '',
       );
 
-      // ── Registra peças de Água/Espuma ──────────────────────────────────
       if (pecasSelecionadas.isNotEmpty) {
         await itemOsProvider.registrarPecasTrocadas(
           itemId: widget.item['id'],
           osId: widget.osId,
           empresaId: empresaId,
-          pecas: pecasSelecionadas,q
+          pecas: pecasSelecionadas,
         );
       }
 

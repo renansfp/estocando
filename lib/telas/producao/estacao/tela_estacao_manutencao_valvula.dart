@@ -37,6 +37,10 @@ class _TelaEstacaoManutencaoValvulaState
   final _pesoCheioController = TextEditingController();
   bool _buscando = false;
   bool _processando = false;
+
+  Stream<List<Map<String, dynamic>>>? _streamItens;
+  String? _empresaIdEscutando;
+  List<Map<String, dynamic>> _itensSnapshot = [];
   Equipamento? _equipamentoAtual;
   // Trocamos DocumentSnapshot por Map
   Map<String, dynamic>? _itemOsAtual;
@@ -48,6 +52,21 @@ class _TelaEstacaoManutencaoValvulaState
     if (widget.codigoPreDefinido != null) {
       WidgetsBinding.instance.addPostFrameCallback(
               (_) => _buscarItemPorBipe(widget.codigoPreDefinido!));
+    }
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final empresaId = context.watch<UsuarioProvider>().usuario?.empresaId;
+    if (empresaId != null &&
+        empresaId.isNotEmpty &&
+        empresaId != _empresaIdEscutando) {
+      _empresaIdEscutando = empresaId;
+      _streamItens = context
+          .read<ItemOsProvider>()
+          .streamItensPorOsEStatus(
+          widget.osId, 'aguardando_manutencao_valvula', empresaId);
     }
   }
 
@@ -96,11 +115,24 @@ class _TelaEstacaoManutencaoValvulaState
     try {
       // Busca o item via provider
       final empresaId = context.read<UsuarioProvider>().usuario?.empresaId ?? '';
-      final item = await itemOsProvider.buscarItemPorCracha(
-        widget.osId,
-        idLimpo,
-        'aguardando_manutencao_valvula', empresaId,
-      );
+      // Busca local — scan instantâneo (sem round-trip Firestore)
+      Map<String, dynamic>? item;
+      if (_itensSnapshot.isNotEmpty) {
+        try {
+          item = _itensSnapshot.firstWhere(
+                (i) => i['idCrachaTemporario']?.toString() == idLimpo,
+          );
+        } catch (_) {
+          item = null;
+        }
+      }
+      // Fallback ao Firestore apenas se o snapshot ainda não chegou
+      if (item == null && _itensSnapshot.isEmpty) {
+        item = await itemOsProvider.buscarItemPorCracha(
+          widget.osId, idLimpo, 'aguardando_manutencao_valvula', empresaId,
+        );
+      }
+
 
       if (item != null) {
         // Busca o equipamento via EquipamentoProvider
@@ -174,6 +206,7 @@ class _TelaEstacaoManutencaoValvulaState
         pesoVazio     : _pesoVazioController.text,
         pesoCheioMeta : _pesoCheioController.text,
         proximaEstacao: proximaEstacao,
+        statusAtualItem: _itemOsAtual!['status'] as String? ?? '',
       );
 
       // ── Registra peças e baixa estoque ────────────────────────────────────
@@ -209,7 +242,6 @@ class _TelaEstacaoManutencaoValvulaState
 
   @override
   Widget build(BuildContext context) {
-    final empresaId = context.read<UsuarioProvider>().usuario?.empresaId ?? '';
     return Scaffold(
       appBar: AppBar(
         title: const Text('Bancada Válvula'),
@@ -340,12 +372,10 @@ class _TelaEstacaoManutencaoValvulaState
                   ),
                   Expanded(
                     child: StreamBuilder<List<Map<String, dynamic>>>(
-                      stream: context
-                          .read<ItemOsProvider>()
-                          .streamItensPorOsEStatus(
-                          widget.osId, 'aguardando_manutencao_valvula', empresaId),
+                      stream: _streamItens,
                       builder: (context, snapshot) {
                         if (!snapshot.hasData) return const SizedBox.shrink();
+                        _itensSnapshot = snapshot.data!;
                         final itens = snapshot.data!;
 
                         if (itens.isEmpty) {
